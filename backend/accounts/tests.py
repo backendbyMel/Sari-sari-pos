@@ -27,6 +27,8 @@ LOGIN_REQUIRED = OWNER_ONLY + [
     ('get', '/api/sales/recent/'),
     ('get', '/api/receipts/SR-000001/'),
     ('post', '/api/receipts/SR-000001/reprint/'),
+    ('get', '/api/shifts/current/'),
+    ('post', '/api/shifts/start/'),
 ]
 
 

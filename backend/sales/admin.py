@@ -8,7 +8,7 @@ class SaleItemInline(admin.TabularInline):
 
 @admin.register(Sale)
 class SaleAdmin(ReadOnlyAdmin):
-    list_display = ('receipt_no', 'cashier', 'payment_type', 'total', 'status', 'timestamp')
+    list_display = ('receipt_no', 'cashier', 'shift', 'payment_type', 'total', 'status', 'timestamp')
     list_filter = ('status', 'payment_type')
     inlines = [SaleItemInline]
 

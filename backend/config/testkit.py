@@ -50,3 +50,7 @@ def make_candy(stock='100'):
     )
     PriceTier.objects.create(product_unit=piece, min_qty=Decimal('3'), price=Decimal('2.00'))
     return product, piece
+
+def open_shift(cashier, opening_cash='1000.00'):
+    from shifts.models import Shift
+    return Shift.objects.create(cashier=cashier, opening_cash=Decimal(opening_cash))

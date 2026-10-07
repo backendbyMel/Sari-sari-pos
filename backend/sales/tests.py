@@ -3,11 +3,13 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from config.testkit import client_for, make_candy, make_cashier, make_marlboro, make_owner
+from config.testkit import (
+    client_for, make_candy, make_cashier, make_marlboro, make_owner, open_shift,
+)
 from inventory.models import PriceTier, StockMovement
 from sales.models import Receipt, Sale, SaleItem
 from sales.services import create_sale, price_line
-
+from shifts.models import Shift
 # Create your tests here.
 class PriceLineTests(TestCase):
     def setUp(self):
@@ -30,6 +32,7 @@ class SaleTests(TestCase):
     def setUp(self):
         self.owner = make_owner()
         self.cashier = make_cashier()
+        self.shift = open_shift(self.cashier)
         self.api = client_for(self.cashier)
         self.marlboro, self.stick, self.pack = make_marlboro()   # cost P8 per stick
         self.candy, self.piece = make_candy()
@@ -73,6 +76,7 @@ class SaleTests(TestCase):
     def test_cash_below_total_is_refused_and_nothing_is_saved(self):
         response = self.sell([self.line(self.piece, '7')], '4')
         self.assertEqual(response.status_code, 400)
+        self.assertIn('Cash received', str(response.data))
         self.assertEqual(Sale.objects.count(), 0)
         self.assertEqual(Receipt.objects.count(), 0)
         self.assertEqual(StockMovement.objects.count(), 0)
@@ -169,10 +173,11 @@ class ReceiptTests(TestCase):
     def setUp(self):
         self.owner = make_owner()
         self.cashier = make_cashier()
+        open_shift(self.cashier)
         self.api = client_for(self.cashier)
-        make_candy()
+        _, piece = make_candy()
         self.api.post('/api/sales/', {
-            'items': [{'product_unit': 1, 'quantity': '1'}], 'cash_received': '5'}, format='json')
+            'items': [{'product_unit': piece.id, 'quantity': '1'}], 'cash_received': '5'}, format='json')
 
     def test_reprint_is_marked_copy_and_logged(self):
         self.assertFalse(self.api.get('/api/receipts/SR-000001/').data['is_copy'])
@@ -193,3 +198,43 @@ class ReceiptTests(TestCase):
     def test_recent_list_has_only_safe_fields(self):
         row = self.api.get('/api/sales/recent/').data[0]
         self.assertEqual(set(row), {'receipt_no', 'cashier', 'total', 'status', 'date_time'})
+
+class ShiftRuleTests(TestCase):
+    def setUp(self):
+        self.owner = make_owner()
+        self.cashier = make_cashier()
+        _, self.piece = make_candy()
+
+    def sell(self, user):
+        return client_for(user).post('/api/sales/', {
+            'items': [{'product_unit': self.piece.id, 'quantity': '1'}],
+            'cash_received': '5'}, format='json')
+
+    def test_no_shift_no_sale(self):
+        response = self.sell(self.cashier)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('shift', response.data)
+        self.assertEqual(Sale.objects.count(), 0)
+        self.assertEqual(StockMovement.objects.count(), 0)
+        # The refused attempt did not use up a receipt number.
+        open_shift(self.cashier)
+        self.assertEqual(self.sell(self.cashier).data['receipt']['receipt_no'], 'SR-000001')
+
+    def test_the_sale_is_tied_to_the_open_shift(self):
+        shift = open_shift(self.cashier)
+        self.sell(self.cashier)
+        self.assertEqual(Sale.objects.get().shift, shift)
+
+    def test_a_closed_shift_does_not_count(self):
+        shift = open_shift(self.cashier)
+        shift.status = 'closed'
+        shift.save()
+        self.assertEqual(self.sell(self.cashier).status_code, 400)
+
+    def test_someone_elses_shift_does_not_count(self):
+        open_shift(make_cashier('cash2'))
+        self.assertEqual(self.sell(self.cashier).status_code, 400)
+
+    def test_the_owner_needs_a_shift_too(self):
+        open_shift(self.cashier)
+        self.assertEqual(self.sell(self.owner).status_code, 400)

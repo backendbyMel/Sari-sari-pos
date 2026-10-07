@@ -27,6 +27,10 @@ class Sale(models.Model):
     cashier = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='sales'
     )
+    shift = models.ForeignKey(
+        'shifts.Shift', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='sales',
+    )
     payment_type = models.CharField(
         max_length=10, choices=PaymentType.choices, default=PaymentType.CASH
     )

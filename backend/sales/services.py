@@ -8,7 +8,7 @@ from rest_framework.exceptions import ValidationError, NotFound
 from inventory.models import Product, ProductUnit, StockMovement
 
 from .models import Receipt, ReceiptCounter, Sale, SaleItem
-
+from shifts.models import Shift
 ZERO = Decimal('0')
 MONEY = Decimal('0.01')
 QTY = Decimal('0.001')
@@ -37,6 +37,16 @@ def price_line(unit, quantity):
 
 @transaction.atomic
 def create_sale(*, cashier, items, payment_type, cash_received):
+    shift = (
+        Shift.objects.select_for_update()
+        .filter(cashier=cashier, status=Shift.Status.OPEN)
+        .first()
+    )
+    if shift is None:
+        raise ValidationError(
+            {'shift': 'You have no open shift. Start your shift before selling.'}
+        )
+    
     wanted = {}
     for line in items:
         unit_id = line['product_unit']
@@ -87,7 +97,7 @@ def create_sale(*, cashier, items, payment_type, cash_received):
 
     receipt_no = next_receipt_no()
     sale = Sale.objects.create(
-        receipt_no=receipt_no, cashier=cashier, payment_type=payment_type,
+        receipt_no=receipt_no, cashier=cashier, shift=shift, payment_type=payment_type,
         total=total, discount=ZERO, cash_received=cash_received,
         change=cash_received - total,
     )
