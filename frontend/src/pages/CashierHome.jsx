@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { apiFetch } from '../api'
 import { useAuth } from '../AuthContext'
-
+import { Link } from 'react-router-dom'
 export default function CashierHome() {
   const { user, logout } = useAuth()
   const [message, setMessage] = useState('')
@@ -15,6 +15,7 @@ export default function CashierHome() {
     <div style={{ padding: 24, fontFamily: 'sans-serif' }}>
       <h1>Cashier Home</h1>
       <p>Logged in as <b>{user.username}</b> ({user.role})</p>
+      <p><Link to="/price-check">Price Check</Link></p>
       <button onClick={testOwnerEndpoint}>Try an Owner-only endpoint (should be refused)</button>{' '}
       <button onClick={logout}>Log out</button>
       <p>{message}</p>

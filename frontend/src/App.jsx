@@ -4,7 +4,7 @@ import ProtectedRoute from './ProtectedRoute'
 import CashierHome from './pages/CashierHome'
 import LoginPage from './pages/LoginPage'
 import OwnerHome from './pages/OwnerHome'
-
+import PriceCheckPage from './pages/PriceCheckPage'
 function HomeRedirect() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
@@ -17,6 +17,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/owner" element={<ProtectedRoute role="OWNER"><OwnerHome /></ProtectedRoute>} />
       <Route path="/cashier" element={<ProtectedRoute><CashierHome /></ProtectedRoute>} />
+      <Route path="/price-check" element={<ProtectedRoute><PriceCheckPage /></ProtectedRoute>} />
       <Route path="/" element={<HomeRedirect />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
