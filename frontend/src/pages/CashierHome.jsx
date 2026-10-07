@@ -15,6 +15,8 @@ export default function CashierHome() {
     <div style={{ padding: 24, fontFamily: 'sans-serif' }}>
       <h1>Cashier Home</h1>
       <p>Logged in as <b>{user.username}</b> ({user.role})</p>
+      <p><Link to="/sales"><b>Sales</b></Link></p>
+      <p><Link to="/receipts">Receipts (reprint)</Link></p>
       <p><Link to="/price-check">Price Check</Link></p>
       <button onClick={testOwnerEndpoint}>Try an Owner-only endpoint (should be refused)</button>{' '}
       <button onClick={logout}>Log out</button>

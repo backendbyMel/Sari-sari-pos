@@ -11,4 +11,7 @@ class CustomUserAdmin(UserAdmin):
     list_display = ('username', 'role', 'is_active')
     list_filter = ('role', 'is_active')
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 

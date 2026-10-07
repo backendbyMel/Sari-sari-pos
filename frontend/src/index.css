@@ -1,3 +1,18 @@
 body {
   margin: 0;
 }
+
+@media print {
+  body * { visibility: hidden; }
+  .receipt-print, .receipt-print * { visibility: visible; }
+  .sale-overlay {
+    position: static !important; display: block !important;
+    background: none !important; overflow: visible !important;
+  }
+  .sale-panel {
+    max-height: none !important; overflow: visible !important;
+    padding: 0 !important; box-shadow: none !important;
+  }
+  .receipt-print { position: absolute; left: 0; top: 0; width: 100%; }
+  .no-print, .no-print * { visibility: hidden !important; }
+}

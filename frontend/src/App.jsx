@@ -5,6 +5,15 @@ import CashierHome from './pages/CashierHome'
 import LoginPage from './pages/LoginPage'
 import OwnerHome from './pages/OwnerHome'
 import PriceCheckPage from './pages/PriceCheckPage'
+import SalesPage from './pages/SalesPage'
+import ReceiptsPage from './pages/ReceiptsPage'
+import OwnerLayout from './components/OwnerLayout'
+import ProductsPage from './pages/ProductsPage'
+import ProductUnitsPage from './pages/ProductUnitsPage'
+import RestockPage from './pages/RestockPage'
+import AdjustmentsPage from './pages/AdjustmentsPage'
+import StockHistoryPage from './pages/StockHistoryPage'
+import UsersPage from './pages/UsersPage'
 function HomeRedirect() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
@@ -15,9 +24,21 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/owner" element={<ProtectedRoute role="OWNER"><OwnerHome /></ProtectedRoute>} />
+      <Route path="/owner" element={<ProtectedRoute role="OWNER"><OwnerLayout /></ProtectedRoute>}>
+        <Route index element={<OwnerHome />} />
+        <Route path="products" element={<ProductsPage />} />
+        <Route path="products/:id/units" element={<ProductUnitsPage />} />
+        <Route path="restock" element={<RestockPage />} />
+        <Route path="adjustments" element={<AdjustmentsPage />} />
+        <Route path="stock-history" element={<StockHistoryPage />} />
+        <Route path="users" element={<UsersPage />} />
+      </Route>
+
       <Route path="/cashier" element={<ProtectedRoute><CashierHome /></ProtectedRoute>} />
       <Route path="/price-check" element={<ProtectedRoute><PriceCheckPage /></ProtectedRoute>} />
+      <Route path="/sales" element={<ProtectedRoute><SalesPage /></ProtectedRoute>} />
+      <Route path="/receipts" element={<ProtectedRoute><ReceiptsPage /></ProtectedRoute>} />
+
       <Route path="/" element={<HomeRedirect />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

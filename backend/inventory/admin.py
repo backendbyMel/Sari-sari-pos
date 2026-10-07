@@ -1,5 +1,5 @@
 from django.contrib import admin
-
+from config.admin_utils import ReadOnlyAdmin, ReadOnlyInline
 from .models import (
     Category, PriceTier, Product, ProductUnit, Restock, StockMovement, Supplier,
 )
@@ -7,13 +7,13 @@ from .models import (
 
 class ProductUnitInline(admin.TabularInline):
     model = ProductUnit
-    extra = 1
+    
 
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category', 'base_unit', 'cost_price', 'stock_qty', 'is_active')
-    list_filter = ('category', 'is_active')
+    list_display = ('name', 'category', 'base_unit', 'cost_price', 'stock_qty', 'needs_recount','is_active')
+    list_filter = ('category', 'is_active','needs_recount')
     search_fields = ('name', 'units__barcode')
     inlines = [ProductUnitInline]
 
@@ -23,18 +23,12 @@ class StockMovementAdmin(admin.ModelAdmin):
     list_display = ('timestamp', 'product', 'type', 'quantity', 'balance_after', 'user')
     list_filter = ('type',)
 
-    # Read-only: nobody can add, edit, or delete history through the admin.
-    def has_add_permission(self, request):
-        return False
+@admin.register(Category)
+class CategoryAdmin(ReadOnlyAdmin):
+    pass
 
-    def has_change_permission(self, request, obj=None):
-        return False
+@admin.register(PriceTier)
+class PriceTierAdmin(ReadOnlyAdmin):
+    pass
 
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-
-admin.site.register(Category)
-admin.site.register(PriceTier)
 admin.site.register(Supplier)
-admin.site.register(Restock)

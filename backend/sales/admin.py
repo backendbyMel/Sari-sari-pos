@@ -1,32 +1,10 @@
 from django.contrib import admin
 from .models import Receipt, Sale, SaleItem
-
+from config.admin_utils import ReadOnlyAdmin, ReadOnlyInline
 # Register your models here.
-class ReadOnlyAdmin(admin.ModelAdmin):
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-
 class SaleItemInline(admin.TabularInline):
     model = SaleItem
-    extra = 0
-    can_delete = False
-
-    def has_add_permission(self, request, obj=None):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
+    
 
 @admin.register(Sale)
 class SaleAdmin(ReadOnlyAdmin):
