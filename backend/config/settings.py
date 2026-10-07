@@ -169,3 +169,9 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 AUTH_USER_MODEL = 'accounts.User'
+
+STORE = {
+    'name': 'Mel Liza Store',
+    'address': 'Zone 6 Cugman',
+    'contact': '09551841158',
+}
