@@ -1,26 +1,24 @@
-import { useState } from 'react'
-import { API_URL } from './api'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { useAuth } from './AuthContext'
+import ProtectedRoute from './ProtectedRoute'
+import CashierHome from './pages/CashierHome'
+import LoginPage from './pages/LoginPage'
+import OwnerHome from './pages/OwnerHome'
 
-function App() {
-  const [result, setResult] = useState('Not tested yet.')
-
-  async function testConnection() {
-    setResult('Calling Django...')
-    try {
-      const response = await fetch(`${API_URL}/auth/me/`)
-      setResult(`Django answered with status ${response.status}.`)
-    } catch (error) {
-      setResult(`Could not reach Django: ${error.message}`)
-    }
-  }
-
-  return (
-    <div style={{ padding: 24, fontFamily: 'sans-serif' }}>
-      <h1>Sari-Sari Store POS</h1>
-      <button onClick={testConnection}>Test connection to Django</button>
-      <p>{result}</p>
-    </div>
-  )
+function HomeRedirect() {
+  const { user } = useAuth()
+  if (!user) return <Navigate to="/login" replace />
+  return <Navigate to={user.role === 'OWNER' ? '/owner' : '/cashier'} replace />
 }
 
-export default App
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/owner" element={<ProtectedRoute role="OWNER"><OwnerHome /></ProtectedRoute>} />
+      <Route path="/cashier" element={<ProtectedRoute><CashierHome /></ProtectedRoute>} />
+      <Route path="/" element={<HomeRedirect />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+}
