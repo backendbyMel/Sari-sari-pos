@@ -71,3 +71,50 @@ def record_restock(*, product, unit, quantity, unit_cost, supplier, date,
 
     return {'restock': restock, 'product': product,
             'old_cost': old_cost, 'warnings': warnings}
+
+
+
+ADJUSTMENT_LABELS = {
+    'damaged': 'Damaged',
+    'expired': 'Expired',
+    'stolen': 'Stolen',
+    'count_error': 'Count error',
+}
+LOSS_REASONS = ('damaged', 'expired', 'stolen')
+
+
+@transaction.atomic
+def record_adjustment(*, product, quantity, reason_type, note, user):
+    product = Product.objects.select_for_update().get(pk=product.pk)
+
+    
+    if reason_type in LOSS_REASONS and quantity > 0:
+        raise ValidationError(
+            {'quantity': 'Damaged, expired and stolen can only reduce stock. Use a negative number.'}
+        )
+
+    new_balance = product.stock_qty + quantity
+    if new_balance < 0:
+        raise ValidationError(
+            {'quantity': f'This would make stock negative ({new_balance}). '
+                         f'Current stock is {product.stock_qty}.'}
+        )
+
+    product.stock_qty = new_balance
+    update_fields = ['stock_qty']
+
+    
+    if reason_type == 'count_error' and product.needs_recount:
+        product.needs_recount = False
+        update_fields.append('needs_recount')
+    product.save(update_fields=update_fields)
+
+    movement = StockMovement.objects.create(
+        product=product,
+        type=StockMovement.Type.ADJUSTMENT,
+        quantity=quantity,
+        balance_after=product.stock_qty,
+        user=user,
+        reason=f'{ADJUSTMENT_LABELS[reason_type]}: {note}',
+    )
+    return movement, product

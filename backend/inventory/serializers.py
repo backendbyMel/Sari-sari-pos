@@ -1,6 +1,12 @@
 from rest_framework import serializers
 
-from .models import Category, PriceTier, Product, ProductUnit, Restock, Supplier
+from .models import (Category, 
+                     PriceTier, 
+                     Product, 
+                     ProductUnit, 
+                     Restock, 
+                     StockMovement, 
+                     Supplier)
 from decimal import Decimal
 
 from django.utils import timezone
@@ -114,5 +120,31 @@ class RestockSerializer(serializers.ModelSerializer):
             'id', 'product', 'supplier', 'quantity', 'unit_cost',
             'quantity_remaining', 'expiry_date', 'delivery_receipt_no',
             'received_by', 'date', 'created_at',
+        ]
+        read_only_fields = fields
+
+class StockAdjustmentSerializer(serializers.Serializer):
+    REASON_CHOICES = ['damaged', 'expired', 'stolen', 'count_error']
+
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=3) 
+    reason_type = serializers.ChoiceField(choices=REASON_CHOICES)
+    note = serializers.CharField(max_length=200)  # required, cannot be blank
+
+    def validate(self, attrs):
+        if attrs['quantity'] == 0 and attrs['reason_type'] != 'count_error':
+            raise serializers.ValidationError({'quantity': 'Quantity cannot be zero.'})
+        return attrs
+
+
+class StockMovementSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    user = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = StockMovement
+        fields = [
+            'id', 'product', 'product_name', 'type', 'quantity',
+            'balance_after', 'user', 'reason', 'timestamp',
         ]
         read_only_fields = fields
