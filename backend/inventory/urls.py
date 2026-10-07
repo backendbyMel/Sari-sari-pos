@@ -12,4 +12,5 @@ router.register('price-tiers', views.PriceTierViewSet)
 urlpatterns = [
     path('products/lookup/', views.product_lookup, name='product-lookup'),
     path('', include(router.urls)),
+    path('restocks/', views.RestockListCreateView.as_view(), name='restocks'),
 ]

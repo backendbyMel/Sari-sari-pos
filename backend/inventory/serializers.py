@@ -1,7 +1,9 @@
 from rest_framework import serializers
 
-from .models import Category, PriceTier, Product, ProductUnit
+from .models import Category, PriceTier, Product, ProductUnit, Restock, Supplier
+from decimal import Decimal
 
+from django.utils import timezone
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -68,3 +70,49 @@ class ProductLookupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = ['id', 'name', 'base_unit', 'stock_qty', 'stock_status', 'units']
+
+class RestockCreateSerializer(serializers.Serializer):
+    
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.filter(is_active=True)
+    )
+    product_unit = serializers.PrimaryKeyRelatedField(queryset=ProductUnit.objects.all())
+    quantity = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=Decimal('0.001')
+    )
+    
+    unit_cost = serializers.DecimalField(
+        max_digits=12, decimal_places=4, min_value=Decimal('0')
+    )
+    supplier = serializers.PrimaryKeyRelatedField(
+        queryset=Supplier.objects.all(), required=False, allow_null=True
+    )
+    date = serializers.DateField(default=timezone.localdate) 
+    delivery_receipt_no = serializers.CharField(
+        max_length=50, required=False, allow_blank=True, default=''
+    )
+    expiry_date = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs['product_unit'].product_id != attrs['product'].id:
+            raise serializers.ValidationError(
+                {'product_unit': 'That unit does not belong to this product.'}
+            )
+        expiry = attrs.get('expiry_date')
+        if expiry and expiry < attrs['date']:
+            raise serializers.ValidationError(
+                {'expiry_date': 'Expiry date cannot be before the delivery date.'}
+            )
+        return attrs
+
+
+class RestockSerializer(serializers.ModelSerializer):
+    
+    class Meta:
+        model = Restock
+        fields = [
+            'id', 'product', 'supplier', 'quantity', 'unit_cost',
+            'quantity_remaining', 'expiry_date', 'delivery_receipt_no',
+            'received_by', 'date', 'created_at',
+        ]
+        read_only_fields = fields
