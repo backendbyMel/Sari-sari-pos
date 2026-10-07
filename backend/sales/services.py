@@ -3,7 +3,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, NotFound
 
 from inventory.models import Product, ProductUnit, StockMovement
 
@@ -153,3 +153,24 @@ def build_receipt(sale, *, is_copy=False):
         'is_void': sale.status == Sale.Status.VOIDED,
         'is_copy': is_copy,
     }
+
+@transaction.atomic
+def reprint_receipt(receipt_no, user):
+    receipt = (
+        Receipt.objects.select_for_update()
+        .filter(receipt_no=receipt_no, source=Receipt.Source.SALE)
+        .first()
+    )
+    if receipt is None:
+        raise NotFound('Receipt not found.')
+
+    sale = Sale.objects.select_related('cashier').get(pk=receipt.source_id)
+
+    receipt.reprint_log = receipt.reprint_log + [{
+        'user': user.username,                               
+        'at': timezone.localtime(timezone.now()).isoformat(), 
+    }]
+    receipt.printed_count += 1
+    receipt.save(update_fields=['printed_count', 'reprint_log'])
+
+    return build_receipt(sale, is_copy=True)
