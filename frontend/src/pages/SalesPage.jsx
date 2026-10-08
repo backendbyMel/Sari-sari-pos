@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../api'
 import ReceiptView from '../components/ReceiptView'
-import { PESO, flattenErrors, peso, toCents } from '../utils'
+import { PESO, flattenErrors, formatTime, peso, toCents } from '../utils'
+import { useCurrentShift } from '../useCurrentShift'
 
 const QTY_OK = /^\d+(\.\d{1,3})?$/     
 const CASH_OK = /^\d+(\.\d{1,2})?$/    
@@ -28,7 +29,7 @@ function estimateLineCents(unit, quantity) {
   return total + Math.round(remaining * toCents(unit.selling_price))
 }
 
-export default function SalesPage() {
+function SalesScreen({ shift }) {
   const [lines, setLines] = useState([])       
   const [held, setHeld] = useState(null)       
   const [scan, setScan] = useState('')
@@ -49,7 +50,7 @@ export default function SalesPage() {
   function addUnit(product, unit) {
     setLines((prev) => {
       const index = prev.findIndex((l) => l.unitId === unit.id)
-      if (index >= 0) {   // scanning again increases quantity
+      if (index >= 0) {   
         return prev.map((l, i) =>
           i === index ? { ...l, product, qty: addQty(l.qty, 1) } : l
         )
@@ -101,7 +102,7 @@ export default function SalesPage() {
 
   
   function setQty(unitId, value) {
-    const cleaned = value.replace(/[^\d.]/g, '')   // digits and a dot only
+    const cleaned = value.replace(/[^\d.]/g, '')   
     setLines((prev) => prev.map((l) => (l.unitId === unitId ? { ...l, qty: cleaned } : l)))
   }
 
@@ -194,7 +195,14 @@ export default function SalesPage() {
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: 16, fontFamily: 'sans-serif' }}>
       <p><Link to="/">&larr; Back</Link></p>
       <h1 style={{ margin: '0 0 12px' }}>Sales</h1>
+      {/* <p style={{ margin: '0 0 12px', color: '#555' }}>
+        Shift #{shift.id} &middot; started {formatTime(shift.start_time)}
+      </p> */}
 
+      <p style={{ margin: '0 0 12px', color: '#555' }}>
+        Shift #{shift.id} &middot; started {formatTime(shift.start_time)} &middot;{' '}
+        <Link to="/shift/end">End shift</Link>
+      </p>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* LEFT: scan box and basket */}
         <div style={{ flex: '2 1 420px', minWidth: 0 }}>
@@ -378,6 +386,37 @@ function BasketLine({ line, onQty, onUnit, onRemove, onDone }) {
         <small style={{ color: '#b86e00', display: 'block' }}>
           Stock shows only {num(product.stock_qty)} {product.base_unit}. You can still sell it, and the system will ask for a recount.
         </small>
+      )}
+    </div>
+  )
+}
+
+export default function SalesPage() {
+  const { loading, error, shift, isMine } = useCurrentShift()
+
+  if (loading) return <p style={{ padding: 24, fontFamily: 'sans-serif' }}>Loading...</p>
+  if (error) return <p style={{ padding: 24, fontFamily: 'sans-serif', color: 'crimson' }}>{error}</p>
+  if (!shift || !isMine) return <NoShift shift={shift} />
+  return <SalesScreen shift={shift} />
+}
+
+function NoShift({ shift }) {
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: 16, fontFamily: 'sans-serif' }}>
+      <p><Link to="/">&larr; Back</Link></p>
+      <h1>Sales</h1>
+      {shift ? (
+        <p style={{ background: '#fff3cd', padding: 14, borderRadius: 8 }}>
+          <b>{shift.cashier}</b> has the shift open. You can sell only during your own shift.
+          Please ask the owner.
+        </p>
+      ) : (
+        <>
+          <p style={{ background: '#fdecea', padding: 14, borderRadius: 8 }}>
+            You need an open shift before you can sell.
+          </p>
+          <Link to="/shift/start" style={{ fontSize: 20 }}><b>Start shift</b></Link>
+        </>
       )}
     </div>
   )

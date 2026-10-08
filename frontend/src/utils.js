@@ -14,3 +14,11 @@ export function flattenErrors(data) {
   if (data && typeof data === 'object') return Object.values(data).flatMap(flattenErrors)
   return []
 }
+
+export const formatTime = (iso) =>
+  iso
+    ? new Date(iso).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })
+    : ''
+
+export const signedPeso = (cents) =>
+  (cents < 0 ? '-' : cents > 0 ? '+' : '') + peso(Math.abs(cents))

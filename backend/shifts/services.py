@@ -1,7 +1,15 @@
-from django.db import IntegrityError, transaction
-from rest_framework.exceptions import ValidationError
+from decimal import Decimal
 
-from .models import Shift
+from django.db import IntegrityError, transaction
+from django.db.models import Sum
+from django.utils import timezone
+from rest_framework.exceptions import NotFound, ValidationError
+
+from sales.models import Sale
+
+from .models import Shift, ShiftReopen
+
+ZERO = Decimal('0')
 
 
 @transaction.atomic
@@ -37,3 +45,65 @@ def start_shift(*, cashier, opening_cash):
         raise ValidationError(
             {'shift': 'Another shift was just started. Check the shift status.'}
         )
+
+
+def shift_totals(shift):
+    sales = Sale.objects.filter(shift=shift, status=Sale.Status.COMPLETED)
+    cash = sales.filter(payment_type=Sale.PaymentType.CASH).aggregate(t=Sum('total'))['t']
+    return {'sales_count': sales.count(), 'cash_sales': cash or ZERO}
+
+
+@transaction.atomic
+def close_shift(*, shift_id, counted_cash, denominations, closed_by, reason=''):
+    shift = Shift.objects.select_for_update().filter(pk=shift_id).first()
+    if shift is None:
+        raise NotFound('Shift not found.')
+    if shift.status != Shift.Status.OPEN:
+        raise ValidationError({'shift': 'This shift is already closed.'})
+
+    totals = shift_totals(shift)
+    expected = shift.opening_cash + totals['cash_sales']
+
+    shift.expected_cash = expected
+    shift.counted_cash = counted_cash
+    shift.variance = counted_cash - expected
+    shift.denominations = denominations or None
+    shift.end_time = timezone.now()
+    shift.closed_by = closed_by
+    shift.close_reason = reason
+    shift.status = Shift.Status.CLOSED
+    shift.save()
+    return shift, totals
+
+
+@transaction.atomic
+def reopen_shift(*, shift_id, user, reason):
+    shift = Shift.objects.select_for_update().filter(pk=shift_id).first()
+    if shift is None:
+        raise NotFound('Shift not found.')
+    if shift.status != Shift.Status.CLOSED:
+        raise ValidationError({'shift': 'This shift is not closed.'})
+
+    latest = Shift.objects.order_by('-start_time', '-id').first()
+    if latest.pk != shift.pk:
+        raise ValidationError(
+            {'shift': 'Only the most recent shift can be reopened, because newer shifts '
+                      'start from its closing count.'}
+        )
+
+    ShiftReopen.objects.create(
+        shift=shift, reopened_by=user, reason=reason,
+        previous_end_time=shift.end_time,
+        previous_expected_cash=shift.expected_cash,
+        previous_counted_cash=shift.counted_cash,
+        previous_variance=shift.variance,
+        previous_denominations=shift.denominations,
+        previous_closed_by=shift.closed_by,
+        previous_close_reason=shift.close_reason,
+    )
+    Shift.objects.filter(pk=shift.pk).update(
+        status=Shift.Status.OPEN, end_time=None, expected_cash=None, counted_cash=None,
+        variance=None, denominations=None, closed_by=None, close_reason='',
+    )
+    shift.refresh_from_db()
+    return shift

@@ -19,6 +19,9 @@ OWNER_ONLY = [
     ('get', '/api/stock-movements/'),
     ('get', '/api/users/'),
     ('post', '/api/users/'),
+    ('get', '/api/shifts/'),
+    ('post', '/api/shifts/1/close/'),
+    ('post', '/api/shifts/1/reopen/'),
 ]
 LOGIN_REQUIRED = OWNER_ONLY + [
     ('get', '/api/auth/me/'),
@@ -29,6 +32,7 @@ LOGIN_REQUIRED = OWNER_ONLY + [
     ('post', '/api/receipts/SR-000001/reprint/'),
     ('get', '/api/shifts/current/'),
     ('post', '/api/shifts/start/'),
+    ('post', '/api/shifts/end/'),
 ]
 
 

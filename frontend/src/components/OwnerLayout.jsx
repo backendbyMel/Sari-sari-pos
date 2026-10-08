@@ -8,6 +8,7 @@ const LINKS = [
   { to: '/owner/adjustments', label: 'Adjustments' },
   { to: '/owner/stock-history', label: 'Stock History' },
   { to: '/owner/users', label: 'Users' },
+  { to: '/owner/shifts', label: 'Shifts' },
 ]
 
 export default function OwnerLayout() {
