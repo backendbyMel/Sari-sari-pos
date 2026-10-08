@@ -39,7 +39,7 @@ class StoreCase(TestCase):
     def get_status(self, api, url):
         response = api.get(url)
         if getattr(response, 'streaming', False):
-            response.close()
+            b''.join(response.streaming_content)   # reading it to the end closes the file safely
         return response.status_code
 
     def run_check(self, **options):

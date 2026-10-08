@@ -298,7 +298,7 @@ def generate_shift_report(shift_id):
     """Makes both PDFs for a CLOSED shift. If the current close already has a report, returns it."""
     with transaction.atomic():
         shift = (
-            Shift.objects.select_for_update().select_related('cashier', 'closed_by').get(pk=shift_id)
+            Shift.objects.select_for_update(of=('self',)).select_related('cashier', 'closed_by').get(pk=shift_id)
         )
         if shift.status != Shift.Status.CLOSED:
             raise ValueError('Only a closed shift has a report.')
