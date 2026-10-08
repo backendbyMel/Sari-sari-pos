@@ -4,21 +4,30 @@ from rest_framework.views import APIView
 
 from accounts.permissions import IsCashierOrOwner, IsOwner
 
-from .models import Shift
+from .models import Shift, CashMovement
 from .serializers import (
-    OwnerShiftSerializer, ReasonSerializer, ShiftEndSerializer, ShiftOwnerCloseSerializer,
+    CashMovementSerializer, OwnerShiftSerializer, PayoutCreateSerializer,
+    ReasonSerializer, ShiftEndSerializer, ShiftOwnerCloseSerializer,
     ShiftResultSerializer, ShiftSerializer, ShiftStartSerializer,
 )
-from .services import close_shift, reopen_shift, start_shift
-from django.db.models import Count
+from .services import close_shift, reopen_shift, start_shift, record_payout, shift_totals, start_shift
+from django.db.models import Count, Sum
 from rest_framework.exceptions import ValidationError
+from decimal import Decimal
+from django.shortcuts import get_object_or_404
 # Create your views here.
+
+def money(value):
+    """Decimal -> '5.00' (text, so money is never a float in JSON)."""
+    return str(Decimal(value).quantize(Decimal('0.01')))
 
 def result_payload(shift, totals):
     return {
         'shift': ShiftResultSerializer(shift).data,
         'sales_count': totals['sales_count'],
-        'cash_sales': str(totals['cash_sales']), 
+        'cash_sales': money(totals['cash_sales']),
+        'payouts_total': money(totals['payouts_total']),
+        'payouts_count': totals['payouts_count'],
     }
 
 class ShiftStartView(APIView):
@@ -81,7 +90,6 @@ class ShiftOwnerCloseView(APIView):
 
 
 class ShiftReopenView(APIView):
-    """POST /api/shifts/<id>/reopen/  (Owner only). A reason is required and logged."""
     permission_classes = [IsOwner]
 
     def post(self, request, pk):
@@ -92,13 +100,72 @@ class ShiftReopenView(APIView):
 
 
 class ShiftListView(APIView):
-    """GET /api/shifts/  (Owner only). The latest 30 shifts with every detail."""
     permission_classes = [IsOwner]
 
     def get(self, request):
-        shifts = (
+        shifts = list(
             Shift.objects.select_related('cashier', 'closed_by')
             .annotate(reopen_count=Count('reopens'))
             .order_by('-start_time', '-id')[:30]
         )
-        return Response(OwnerShiftSerializer(shifts, many=True).data)
+        paid = {
+            row['shift']: row
+            for row in CashMovement.objects.filter(
+                shift__in=[s.pk for s in shifts], type=CashMovement.Type.OUT
+            ).values('shift').annotate(total=Sum('amount'), count=Count('id'))
+        }
+        rows = []
+        for row in OwnerShiftSerializer(shifts, many=True).data:
+            entry = dict(row)
+            found = paid.get(row['id'])
+            entry['payouts_total'] = money(found['total']) if found else '0.00'
+            entry['payouts_count'] = found['count'] if found else 0
+            rows.append(entry)
+        return Response(rows)
+
+class ShiftPayoutView(APIView):
+    permission_classes = [IsCashierOrOwner]
+
+    def post(self, request):
+        form = PayoutCreateSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        movement, warnings = record_payout(
+            user=request.user,   # from the login, never from the request body
+            amount=form.validated_data['amount'],
+            reason=form.validated_data['reason'],
+        )
+        return Response(
+            {'payout': CashMovementSerializer(movement).data, 'warnings': warnings},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ShiftSummaryView(APIView):
+    permission_classes = [IsCashierOrOwner]
+
+    def get(self, request):
+        shift = (
+            Shift.objects.select_related('cashier')
+            .filter(cashier=request.user, status=Shift.Status.OPEN)
+            .first()
+        )
+        if shift is None:
+            return Response({'shift': None})
+        totals = shift_totals(shift)
+        payouts = shift.cash_movements.filter(type=CashMovement.Type.OUT).select_related('recorded_by')
+        return Response({
+            'shift': ShiftSerializer(shift).data,
+            'sales_count': totals['sales_count'],
+            'sales_total': money(totals['sales_total']),
+            'payouts_total': money(totals['payouts_total']),
+            'payouts': CashMovementSerializer(payouts, many=True).data,
+        })
+
+
+class ShiftPayoutsOwnerView(APIView):
+    permission_classes = [IsOwner]
+
+    def get(self, request, pk):
+        shift = get_object_or_404(Shift, pk=pk)
+        payouts = shift.cash_movements.select_related('recorded_by')
+        return Response(CashMovementSerializer(payouts, many=True).data)

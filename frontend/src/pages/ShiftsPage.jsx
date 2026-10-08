@@ -116,8 +116,9 @@ export default function ShiftsPage() {
                 <th style={cell}>Expected</th>
                 <th style={cell}>Counted</th>
                 <th style={cell}>Variance</th>
+                <th style={cell}>Pay-outs</th>
                 <th style={cell}>Notes</th>
-                <th style={cell}></th>
+                <th style={cell}>.</th>
               </tr>
             </thead>
             <tbody>
@@ -142,8 +143,10 @@ export default function ShiftsPage() {
 }
 
 function ShiftRow({ shift: s, canReopen, reopening, onStartReopen, onCancelReopen, onReopen }) {
+  const [showPayouts, setShowPayouts] = useState(false)
   const isOpen = s.status === 'open'
   const notes = []
+  
   if (s.opening_difference !== null && parseFloat(s.opening_difference) !== 0) {
     notes.push(
       `Opening cash was ${signedPeso(toCents(s.opening_difference))} compared with the last count (${PESO}${s.previous_closing_cash}).`
@@ -165,6 +168,15 @@ function ShiftRow({ shift: s, canReopen, reopening, onStartReopen, onCancelReope
         <td style={{ ...cell, fontWeight: 'bold', color: s.variance ? varianceColor(s.variance) : undefined }}>
           {s.variance !== null ? signedPeso(toCents(s.variance)) : '-'}
         </td>
+        <td style={cell}>
+          {s.payouts_count > 0 ? (
+            <button onClick={() => setShowPayouts((v) => !v)} style={{ padding: '4px 8px' }}>
+              {PESO}{s.payouts_total} ({s.payouts_count})
+            </button>
+          ) : (
+            '-'
+          )}
+        </td>
         <td style={{ ...cell, fontSize: 13, maxWidth: 300 }}>
           {notes.map((n) => <div key={n}>{n}</div>)}
         </td>
@@ -172,9 +184,16 @@ function ShiftRow({ shift: s, canReopen, reopening, onStartReopen, onCancelReope
           {canReopen && !reopening && <button onClick={onStartReopen} style={{ padding: '6px 10px' }}>Reopen</button>}
         </td>
       </tr>
+      {showPayouts && (
+        <tr>
+          <td colSpan={11} style={{ padding: 10, background: '#fafafa' }}>
+            <PayoutDetails shiftId={s.id} />
+          </td>
+        </tr>
+      )}
       {reopening && (
         <tr>
-          <td colSpan={10} style={{ padding: 10, background: '#fafafa' }}>
+          <td colSpan={11} style={{ padding: 10, background: '#fafafa' }}>
             <ReopenForm shift={s} onSave={onReopen} onCancel={onCancelReopen} />
           </td>
         </tr>
@@ -223,6 +242,36 @@ function ReopenForm({ shift, onSave, onCancel }) {
       <button type="button" onClick={onCancel} disabled={busy} style={{ padding: '8px 14px' }}>Cancel</button>
       {error && <span style={{ color: 'crimson', width: '100%' }}>{error}</span>}
     </form>
+  )
+}
+function PayoutDetails({ shiftId }) {
+  const [rows, setRows] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    async function run() {
+      try {
+        const response = await apiFetch(`/shifts/${shiftId}/payouts/`)
+        if (response.ok) setRows(await response.json())
+        else if (response.status !== 401) setError('Could not load the pay-outs.')
+      } catch {
+        setError('Cannot reach the server.')
+      }
+    }
+    run()
+  }, [shiftId])
+
+  if (error) return <span style={{ color: 'crimson' }}>{error}</span>
+  if (!rows) return <span>Loading...</span>
+  return (
+    <div>
+      <b>Pay-outs of shift #{shiftId}</b>
+      {rows.map((p) => (
+        <div key={p.id} style={{ padding: '4px 0' }}>
+          {PESO}{p.amount} &middot; {p.reason} &middot; by {p.recorded_by} &middot; {formatTime(p.timestamp)}
+        </div>
+      ))}
+    </div>
   )
 }
 

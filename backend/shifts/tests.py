@@ -4,11 +4,13 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
-from config.testkit import client_for, make_cashier, make_owner, open_shift
-from shifts.models import Shift, ShiftReopen
+from config.testkit import client_for, make_candy, make_cashier, make_owner, open_shift
+from sales.models import Sale
+from shifts.models import Shift, ShiftReopen, CashMovement
 
-# Create your tests here.
+
 def closed_shift(cashier, counted='1500.00'):
+    """A finished shift, for testing the opening-cash comparison."""
     return Shift.objects.create(
         cashier=cashier, opening_cash=Decimal('1000'), status='closed',
         end_time=timezone.now(), counted_cash=Decimal(counted),
@@ -325,3 +327,117 @@ class ShiftListTests(TestCase):
         self.assertIn('opening_difference', owner_row)
         self.assertEqual(owner_row['reopen_count'], 0)
         self.assertEqual(client_for(cashier).get('/api/shifts/').status_code, 403)
+
+class PayoutTests(TestCase):
+    def setUp(self):
+        self.owner = make_owner()
+        self.cashier = make_cashier()
+        self.shift = open_shift(self.cashier, '1000.00')
+        self.api = client_for(self.cashier)
+        _, self.piece = make_candy()
+
+    def payout(self, amount='100', reason='Bought ice', api=None):
+        return (api or self.api).post(
+            '/api/shifts/payouts/', {'amount': amount, 'reason': reason}, format='json')
+
+    def sell(self, qty='7', cash='10'):
+        return self.api.post('/api/sales/', {
+            'items': [{'product_unit': self.piece.id, 'quantity': qty}],
+            'cash_received': cash}, format='json')
+
+    def test_a_payout_is_recorded_under_the_cashier_and_shift(self):
+        response = self.payout()
+        self.assertEqual(response.status_code, 201)
+        movement = CashMovement.objects.get()
+        self.assertEqual(movement.shift, self.shift)
+        self.assertEqual(movement.recorded_by, self.cashier)
+        self.assertEqual(movement.type, 'out')
+        self.assertEqual(movement.amount, Decimal('100.00'))
+        self.assertEqual(movement.reason, 'Bought ice')
+
+    def test_bad_requests_are_refused(self):
+        bad = [
+            {'amount': '0', 'reason': 'x'}, {'amount': '-5', 'reason': 'x'},
+            {'amount': 'abc', 'reason': 'x'}, {'amount': '1.234', 'reason': 'x'},
+            {'amount': '', 'reason': 'x'}, {'amount': '10'},
+            {'amount': '10', 'reason': ''}, {'amount': '10', 'reason': '   '},
+        ]
+        for body in bad:
+            with self.subTest(body=body):
+                self.assertEqual(self.api.post('/api/shifts/payouts/', body, format='json').status_code, 400)
+        self.assertEqual(CashMovement.objects.count(), 0)
+
+    def test_no_open_shift_no_payout(self):
+        other = client_for(make_cashier('cash2'))       # has no shift
+        self.assertEqual(self.payout(api=other).status_code, 400)
+        self.assertEqual(CashMovement.objects.count(), 0)
+
+    def test_a_closed_shift_takes_no_payouts(self):
+        self.api.post('/api/shifts/end/', {'counted_cash': '1000'}, format='json')
+        self.assertEqual(self.payout().status_code, 400)
+
+    def test_a_browser_cannot_choose_the_shift_or_the_person(self):
+        other_shift = open_shift  # (only one shift can be open, so just try to inject ids)
+        body = {'amount': '10', 'reason': 'x', 'shift': 999, 'recorded_by': self.owner.id}
+        self.assertEqual(self.api.post('/api/shifts/payouts/', body, format='json').status_code, 201)
+        movement = CashMovement.objects.get()
+        self.assertEqual(movement.shift, self.shift)
+        self.assertEqual(movement.recorded_by, self.cashier)
+
+    def test_payouts_reduce_the_expected_cash(self):
+        self.sell()                    # P5.00 of cash sales
+        self.payout('100')
+        shift = self.api.post('/api/shifts/end/', {'counted_cash': '905'}, format='json').data
+        self.assertEqual(Decimal(shift['shift']['expected_cash']), Decimal('905'))   # 1000 + 5 - 100
+        self.assertEqual(Decimal(shift['shift']['variance']), 0)
+        self.assertEqual(Decimal(shift['payouts_total']), Decimal('100'))
+        self.assertEqual(shift['payouts_count'], 1)
+
+    def test_a_big_payout_warns_without_revealing_the_expected_cash(self):
+        response = self.payout('5000')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(len(response.data['warnings']), 1)
+        self.assertNotIn('1000', response.data['warnings'][0])
+
+    def test_a_normal_payout_has_no_warning(self):
+        self.assertEqual(self.payout('100').data['warnings'], [])
+
+    def test_the_summary_shows_sales_and_payouts_but_no_secrets(self):
+        self.sell()
+        self.payout('100', 'Bought ice')
+        response = self.api.get('/api/shifts/summary/')
+        self.assertEqual(response.data['sales_count'], 1)
+        self.assertEqual(Decimal(response.data['sales_total']), Decimal('5'))
+        self.assertEqual(Decimal(response.data['payouts_total']), Decimal('100'))
+        self.assertEqual(response.data['payouts'][0]['reason'], 'Bought ice')
+        text = response.content.decode().lower()
+        for secret in ('expected', 'cost', 'profit', 'previous', 'difference'):
+            self.assertNotIn(secret, text)
+
+    def test_the_summary_without_a_shift(self):
+        other = client_for(make_cashier('cash2'))
+        self.assertIsNone(other.get('/api/shifts/summary/').data['shift'])
+
+    def test_payouts_are_append_only(self):
+        self.payout()
+        movement = CashMovement.objects.get()
+        with self.assertRaises(PermissionError):
+            movement.delete()
+        movement.amount = Decimal('1')
+        with self.assertRaises(PermissionError):
+            movement.save()
+
+    def test_the_owner_sees_every_payout_and_the_cashier_cannot(self):
+        self.payout('100', 'Bought ice')
+        url = f'/api/shifts/{self.shift.id}/payouts/'
+        rows = client_for(self.owner).get(url).data
+        self.assertEqual(rows[0]['reason'], 'Bought ice')
+        self.assertEqual(rows[0]['recorded_by'], 'cash')
+        self.assertEqual(self.api.get(url).status_code, 403)
+
+    def test_the_owner_list_includes_payout_totals(self):
+        self.payout('100')
+        self.payout('50.50', 'Paid supplier')
+        row = client_for(self.owner).get('/api/shifts/').data[0]
+        self.assertEqual(Decimal(row['payouts_total']), Decimal('150.50'))
+        self.assertEqual(row['payouts_count'], 2)

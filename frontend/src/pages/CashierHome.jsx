@@ -31,6 +31,8 @@ export default function CashierHome() {
             <p style={{ margin: '6px 0 10px', color: '#1b7f3b' }}>
               Your shift is open (since {formatTime(shift.start_time)}).
             </p>
+            <Link to="/shift/summary"><b>Shift summary and pay-outs</b></Link>
+            <br />
             <Link to="/shift/end"><b>End shift</b></Link>
           </>
         )}

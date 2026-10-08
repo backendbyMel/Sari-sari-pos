@@ -7,7 +7,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 
 from sales.models import Sale
 
-from .models import Shift, ShiftReopen
+from .models import Shift, ShiftReopen, CashMovement
 
 ZERO = Decimal('0')
 
@@ -50,7 +50,16 @@ def start_shift(*, cashier, opening_cash):
 def shift_totals(shift):
     sales = Sale.objects.filter(shift=shift, status=Sale.Status.COMPLETED)
     cash = sales.filter(payment_type=Sale.PaymentType.CASH).aggregate(t=Sum('total'))['t']
-    return {'sales_count': sales.count(), 'cash_sales': cash or ZERO}
+    everything = sales.aggregate(t=Sum('total'))['t']
+    payouts = CashMovement.objects.filter(shift=shift, type=CashMovement.Type.OUT)
+    paid = payouts.aggregate(t=Sum('amount'))['t']
+    return {
+        'sales_count': sales.count(),
+        'sales_total': everything or ZERO,
+        'cash_sales': cash or ZERO,
+        'payouts_total': paid or ZERO,
+        'payouts_count': payouts.count(),
+    }
 
 
 @transaction.atomic
@@ -62,7 +71,7 @@ def close_shift(*, shift_id, counted_cash, denominations, closed_by, reason=''):
         raise ValidationError({'shift': 'This shift is already closed.'})
 
     totals = shift_totals(shift)
-    expected = shift.opening_cash + totals['cash_sales']
+    expected = shift.opening_cash + totals['cash_sales'] - totals['payouts_total']
 
     shift.expected_cash = expected
     shift.counted_cash = counted_cash
@@ -107,3 +116,28 @@ def reopen_shift(*, shift_id, user, reason):
     )
     shift.refresh_from_db()
     return shift
+
+@transaction.atomic
+def record_payout(*, user, amount, reason):
+    shift = (
+        Shift.objects.select_for_update()
+        .filter(cashier=user, status=Shift.Status.OPEN)
+        .first()
+    )
+    if shift is None:
+        raise ValidationError({'shift': 'You have no open shift. Start your shift first.'})
+
+    totals = shift_totals(shift)
+    drawer = shift.opening_cash + totals['cash_sales'] - totals['payouts_total']
+    warnings = []
+    if amount > drawer:
+        warnings.append(
+            'This is more than the drawer should hold, according to the system. '
+            'Please check the amount.'
+        )
+
+    movement = CashMovement.objects.create(
+        shift=shift, type=CashMovement.Type.OUT, amount=amount,
+        reason=reason, recorded_by=user,
+    )
+    return movement, warnings

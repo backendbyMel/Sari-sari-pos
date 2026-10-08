@@ -199,8 +199,13 @@ function SalesScreen({ shift }) {
         Shift #{shift.id} &middot; started {formatTime(shift.start_time)}
       </p> */}
 
+      {/* <p style={{ margin: '0 0 12px', color: '#555' }}>
+        Shift #{shift.id} &middot; started {formatTime(shift.start_time)} &middot;{' '}
+        <Link to="/shift/end">End shift</Link>
+      </p> */}
       <p style={{ margin: '0 0 12px', color: '#555' }}>
         Shift #{shift.id} &middot; started {formatTime(shift.start_time)} &middot;{' '}
+        <Link to="/shift/summary">Summary / pay-outs</Link> &middot;{' '}
         <Link to="/shift/end">End shift</Link>
       </p>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -338,6 +343,8 @@ function SalesScreen({ shift }) {
     </div>
   )
 }
+
+
 
 function BasketLine({ line, onQty, onUnit, onRemove, onDone }) {
   const { product, unit, valid, cents } = line

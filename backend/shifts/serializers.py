@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import Shift
+from .models import Shift, CashMovement
 import re
 
 BILLS = ['1000', '500', '200', '100', '50', '20']
@@ -99,3 +99,19 @@ class ShiftOwnerCloseSerializer(ShiftEndSerializer):
 
 class ReasonSerializer(serializers.Serializer):
     reason = serializers.CharField(max_length=200)
+
+
+class PayoutCreateSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal('0.01')
+    )
+    reason = serializers.CharField(max_length=200)   # required, cannot be blank
+
+
+class CashMovementSerializer(serializers.ModelSerializer):
+    recorded_by = serializers.CharField(source='recorded_by.username', read_only=True)
+
+    class Meta:
+        model = CashMovement
+        fields = ['id', 'type', 'amount', 'reason', 'recorded_by', 'timestamp']
+        read_only_fields = fields

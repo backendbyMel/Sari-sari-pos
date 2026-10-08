@@ -93,3 +93,34 @@ class ShiftReopen(models.Model):
 
     def __str__(self):
         return f'Shift #{self.shift_id} reopened by {self.reopened_by}'
+
+
+class CashMovement(models.Model):
+    class Type(models.TextChoices):
+        OUT = 'out', 'Pay-out'
+        IN = 'in', 'Cash in'       
+
+    shift = models.ForeignKey(Shift, on_delete=models.PROTECT, related_name='cash_movements')
+    type = models.CharField(max_length=3, choices=Type.choices)
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))]
+    )
+    reason = models.CharField(max_length=200)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='cash_movements'
+    )
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-timestamp', '-id']
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise PermissionError('Cash movements cannot be edited.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError('Cash movements cannot be deleted.')
+
+    def __str__(self):
+        return f'{self.type} P{self.amount} on shift #{self.shift_id}'

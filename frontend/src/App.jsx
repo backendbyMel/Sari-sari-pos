@@ -17,6 +17,8 @@ import UsersPage from './pages/UsersPage'
 import StartShiftPage from './pages/StartShiftPage'
 import EndShiftPage from './pages/EndShiftPage'
 import ShiftsPage from './pages/ShiftsPage'
+import ShiftSummaryPage from './pages/ShiftSummaryPage'
+
 function HomeRedirect() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
@@ -47,6 +49,7 @@ export default function App() {
       <Route path="/" element={<HomeRedirect />} />
       <Route path="*" element={<Navigate to="/" replace />} />
       <Route path="/shift/end" element={<ProtectedRoute><EndShiftPage /></ProtectedRoute>} />
+      <Route path="/shift/summary" element={<ProtectedRoute><ShiftSummaryPage /></ProtectedRoute>} />
     </Routes>
   )
 }
