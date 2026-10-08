@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 from pathlib import Path
 import os
+import sys
+import tempfile
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -181,3 +183,7 @@ STORE = {
     'address': 'Zone 6 Cugman',
     'contact': '09551841158',
 }
+
+REPORTS_ROOT = BASE_DIR / 'reports'
+if 'test' in sys.argv:
+    REPORTS_ROOT = Path(tempfile.mkdtemp(prefix='pos-test-reports-'))

@@ -4,10 +4,14 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
-from config.testkit import client_for, make_candy, make_cashier, make_owner, open_shift
+from config.testkit import client_for, make_candy, make_cashier, make_marlboro, make_owner, open_shift
 from sales.models import Sale
-from shifts.models import Shift, ShiftReopen, CashMovement
-
+from shifts.models import Shift, ShiftReopen, CashMovement, ShiftReport
+from pathlib import Path
+from unittest.mock import patch
+from django.conf import settings
+from inventory.models import Product, ProductUnit
+from shifts.reports import build_report_data
 
 def closed_shift(cashier, counted='1500.00'):
     """A finished shift, for testing the opening-cash comparison."""
@@ -441,3 +445,161 @@ class PayoutTests(TestCase):
         row = client_for(self.owner).get('/api/shifts/').data[0]
         self.assertEqual(Decimal(row['payouts_total']), Decimal('150.50'))
         self.assertEqual(row['payouts_count'], 2)
+
+class ReportTests(TestCase):
+    def setUp(self):
+        self.owner = make_owner()
+        self.cashier = make_cashier()
+        self.shift = open_shift(self.cashier, '1000.00')
+        self.api = client_for(self.cashier)
+        self.owner_api = client_for(self.owner)
+        _, self.stick, self.pack = make_marlboro()   # cost P8.00 per stick
+        _, self.piece = make_candy()                 # cost P0.50 each
+
+    def work_the_shift(self):
+        self.api.post('/api/sales/', {'items': [
+            {'product_unit': self.pack.id, 'quantity': '1'},
+            {'product_unit': self.piece.id, 'quantity': '7'}], 'cash_received': '200'}, format='json')
+        self.api.post('/api/shifts/payouts/', {'amount': '50', 'reason': 'Bought ice'}, format='json')
+
+    def close(self, counted='1145.00'):   # expected = 1000 + 195 - 50
+        return self.api.post('/api/shifts/end/', {'counted_cash': counted}, format='json')
+
+    def pdf(self, response):
+        return b''.join(response.streaming_content)
+
+    def test_closing_makes_both_pdfs_and_saves_them(self):
+        self.work_the_shift()
+        response = self.close()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['report'], {'report_no': f'SH-{self.shift.id:06d}', 'version': 1})
+        report = ShiftReport.objects.get()
+        for name in (report.cashier_file, report.owner_file):
+            self.assertTrue((Path(settings.REPORTS_ROOT) / name).read_bytes().startswith(b'%PDF'))
+
+    def test_the_cashier_copy_is_built_without_cost_or_profit(self):
+        self.work_the_shift()
+        self.close()
+        self.shift.refresh_from_db()
+        data = build_report_data(self.shift, owner=False, report_no='X')
+        text = str(data).lower()
+        for word in ('profit', 'cost', 'margin', 'difference', 'previous', 'reopen'):
+            self.assertNotIn(word, text)
+
+    def test_the_report_numbers_are_right(self):
+        self.work_the_shift()
+        self.close()
+        self.shift.refresh_from_db()
+        data = build_report_data(self.shift, owner=True, report_no='X')
+        self.assertEqual(data['sales_count'], 1)
+        self.assertEqual(data['sales_total'], Decimal('195.00'))
+        self.assertEqual(data['cash_sales'], Decimal('195.00'))
+        self.assertEqual(data['payouts_total'], Decimal('50.00'))
+        self.assertEqual(data['expected_cash'], Decimal('1145.00'))
+        self.assertEqual(data['variance'], Decimal('0'))
+        self.assertEqual(data['total_profit'], Decimal('31.50'))     # (190-160) + (5-3.50)
+        stock = {r['name']: r['stock'] for r in data['remaining']}
+        self.assertEqual(stock['Marlboro Red'], Decimal('380'))
+        self.assertEqual(data['payouts'][0]['reason'], 'Bought ice')
+
+    def test_download_permissions(self):
+        self.work_the_shift()
+        self.close()
+        url = f'/api/shifts/{self.shift.id}/report/'
+        mine = self.api.get(url)
+        self.assertEqual(mine.status_code, 200)
+        self.assertEqual(mine['Content-Type'], 'application/pdf')
+        self.assertTrue(self.pdf(mine).startswith(b'%PDF'))
+        self.assertEqual(self.api.get(url + '?copy=owner').status_code, 403)
+        self.assertEqual(client_for(make_cashier('cash2')).get(url).status_code, 404)
+        self.assertEqual(client_for().get(url).status_code, 401)
+        self.assertEqual(self.api.get(url + '?copy=nonsense').status_code, 400)
+        for copy in ('cashier', 'owner'):
+            response = self.owner_api.get(f'{url}?copy={copy}&download=1')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('attachment', response['Content-Disposition'])
+            self.assertTrue(self.pdf(response).startswith(b'%PDF'))
+
+    def test_no_report_while_the_shift_is_open(self):
+        self.assertEqual(self.api.get(f'/api/shifts/{self.shift.id}/report/').status_code, 404)
+
+    def test_only_the_number_is_sent_never_file_names(self):
+        self.work_the_shift()
+        self.assertEqual(set(self.close().data['report']), {'report_no', 'version'})
+
+    def test_reopen_and_close_again_makes_version_2_and_keeps_the_old_files(self):
+        self.work_the_shift()
+        self.close()
+        old = ShiftReport.objects.get()
+        reopen = self.owner_api.post(f'/api/shifts/{self.shift.id}/reopen/', {'reason': 'Counted wrong'}, format='json')
+        self.assertEqual(reopen.status_code, 200)
+        self.assertEqual(self.api.get(f'/api/shifts/{self.shift.id}/report/').status_code, 404)   # open again
+        self.close('1145.00')
+        self.assertEqual(ShiftReport.objects.count(), 2)
+        newest = ShiftReport.objects.order_by('-version').first()
+        self.assertTrue(newest.report_no.endswith('-R2'))
+        self.assertEqual(self.api.get(f'/api/shifts/{self.shift.id}/report/').status_code, 200)
+        self.assertTrue((Path(settings.REPORTS_ROOT) / old.owner_file).is_file())
+        with self.assertRaises(PermissionError):
+            old.delete()
+
+    def test_a_pdf_failure_does_not_undo_the_close_and_the_owner_can_make_it_later(self):
+        self.work_the_shift()
+        with patch('shifts.views.generate_shift_report', side_effect=RuntimeError('boom')):
+            with self.assertLogs('shifts.views', level='ERROR'):
+                response = self.close()
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data['report'])
+        self.shift.refresh_from_db()
+        self.assertEqual(self.shift.status, 'closed')
+        self.assertEqual(ShiftReport.objects.count(), 0)
+
+        url = f'/api/shifts/{self.shift.id}/report/generate/'
+        self.assertEqual(self.api.post(url).status_code, 403)
+        self.assertEqual(self.owner_api.post(url).data['report']['version'], 1)
+        self.owner_api.post(url)                      # again: harmless
+        self.assertEqual(ShiftReport.objects.count(), 1)
+
+    def test_generate_needs_a_closed_shift(self):
+        response = self.owner_api.post(f'/api/shifts/{self.shift.id}/report/generate/')
+        self.assertEqual(response.status_code, 400)
+
+    def test_odd_characters_in_names_do_not_break_the_pdf(self):
+        product = Product.objects.create(
+            name='Chips <Cheese> & "Onion"', base_unit='pack', cost_price=Decimal('10'), stock_qty=Decimal('5'))
+        unit = ProductUnit.objects.create(
+            product=product, unit_name='pack', pieces_per_unit=Decimal('1'), selling_price=Decimal('15.00'))
+        self.api.post('/api/sales/', {'items': [{'product_unit': unit.id, 'quantity': '1'}],
+                                      'cash_received': '20'}, format='json')
+        self.api.post('/api/shifts/payouts/', {'amount': '5', 'reason': '<b>ice</b> & more'}, format='json')
+        response = self.close('1010.00')
+        self.assertIsNotNone(response.data['report'])
+        self.assertEqual(ShiftReport.objects.count(), 1)
+
+    def test_owner_filters(self):
+        self.work_the_shift()
+        self.close('1100.00')                         
+        today = timezone.localdate().isoformat()
+        self.assertEqual(len(self.owner_api.get('/api/shifts/?variance=1').data), 1)
+        self.assertEqual(len(self.owner_api.get(f'/api/shifts/?cashier={self.cashier.id}').data), 1)
+        self.assertEqual(len(self.owner_api.get('/api/shifts/?cashier=99999').data), 0)
+        self.assertEqual(len(self.owner_api.get(f'/api/shifts/?date_from={today}&date_to={today}').data), 1)
+        self.assertEqual(len(self.owner_api.get('/api/shifts/?date_from=2999-01-01').data), 0)
+        self.assertEqual(self.owner_api.get('/api/shifts/?date_from=nonsense').status_code, 400)
+        self.assertEqual(self.owner_api.get('/api/shifts/').data[0]['report']['version'], 1)
+
+    def test_an_exact_count_is_not_a_variance(self):
+        self.work_the_shift()
+        self.close('1145.00')
+        self.assertEqual(self.owner_api.get('/api/shifts/?variance=1').data, [])
+
+    def test_my_past_reports(self):
+        self.work_the_shift()
+        self.close()
+        rows = self.api.get('/api/shifts/mine/').data
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['report']['report_no'], f'SH-{self.shift.id:06d}')
+        text = self.api.get('/api/shifts/mine/').content.decode().lower()
+        for secret in ('previous', 'difference', 'profit'):
+            self.assertNotIn(secret, text)
+        self.assertEqual(client_for(make_cashier('cash2')).get('/api/shifts/mine/').data, [])

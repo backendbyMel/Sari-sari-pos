@@ -124,3 +124,29 @@ class CashMovement(models.Model):
 
     def __str__(self):
         return f'{self.type} P{self.amount} on shift #{self.shift_id}'
+
+class ShiftReport(models.Model):
+    shift = models.ForeignKey(Shift, on_delete=models.PROTECT, related_name='reports')
+    version = models.PositiveIntegerField()
+    report_no = models.CharField(max_length=20, unique=True)
+    closed_at = models.DateTimeField()
+    cashier_file = models.CharField(max_length=120)
+    owner_file = models.CharField(max_length=120)
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-generated_at', '-id']
+        constraints = [
+            models.UniqueConstraint(fields=['shift', 'version'], name='one_report_per_version'),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise PermissionError('Reports cannot be edited.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError('Reports cannot be deleted.')
+
+    def __str__(self):
+        return self.report_no

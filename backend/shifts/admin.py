@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from config.admin_utils import ReadOnlyAdmin
 
-from .models import Shift, ShiftReopen, CashMovement
+from .models import Shift, ShiftReopen, CashMovement, ShiftReport
 # Register your models here.
 @admin.register(Shift)
 class ShiftAdmin(ReadOnlyAdmin):
@@ -20,3 +20,7 @@ class ShiftReopenAdmin(ReadOnlyAdmin):
 class CashMovementAdmin(ReadOnlyAdmin):
     list_display = ('timestamp', 'shift', 'type', 'amount', 'reason', 'recorded_by')
     list_filter = ('type',)
+
+@admin.register(ShiftReport)
+class ShiftReportAdmin(ReadOnlyAdmin):
+    list_display = ('report_no', 'shift', 'version', 'generated_at')

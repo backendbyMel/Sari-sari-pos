@@ -23,6 +23,7 @@ OWNER_ONLY = [
     ('post', '/api/shifts/1/close/'),
     ('post', '/api/shifts/1/reopen/'),
     ('get', '/api/shifts/1/payouts/'),
+    ('post', '/api/shifts/1/report/generate/'),
 ]
 LOGIN_REQUIRED = OWNER_ONLY + [
     ('get', '/api/auth/me/'),
@@ -36,6 +37,8 @@ LOGIN_REQUIRED = OWNER_ONLY + [
     ('post', '/api/shifts/end/'),
     ('post', '/api/shifts/payouts/'),
     ('get', '/api/shifts/summary/'),
+    ('get', '/api/shifts/mine/'),
+    ('get', '/api/shifts/1/report/'),
 ]
 
 
