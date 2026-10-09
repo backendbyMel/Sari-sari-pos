@@ -69,3 +69,18 @@ class SettingsTests(TestCase):
     def test_a_cashier_cannot_change_the_credit_settings(self):
         response = self.cashier_api.patch('/api/settings/', {'credit_limit_mode': 'warn'}, format='json')
         self.assertEqual(response.status_code, 403)
+
+    def test_overdue_days(self):
+        self.assertEqual(self.cashier_api.get('/api/settings/public/').data['overdue_days'], 30)
+        self.assertEqual(self.owner_api.patch('/api/settings/', {'overdue_days': 45}, format='json').status_code, 200)
+        self.assertEqual(self.cashier_api.get('/api/settings/public/').data['overdue_days'], 45)
+        for bad in (0, 366, 'abc'):
+            with self.subTest(value=bad):
+                self.assertEqual(self.owner_api.patch('/api/settings/', {'overdue_days': bad}, format='json').status_code, 400)
+        self.assertEqual(self.cashier_api.patch('/api/settings/', {'overdue_days': 1}, format='json').status_code, 403)
+        
+    def test_cashier_topup_permission_setting(self):
+        self.assertFalse(self.cashier_api.get('/api/settings/public/').data['cashier_can_topup'])
+        self.assertEqual(self.owner_api.patch('/api/settings/', {'cashier_can_topup': True}, format='json').status_code, 200)
+        self.assertTrue(self.cashier_api.get('/api/settings/public/').data['cashier_can_topup'])
+        self.assertEqual(self.cashier_api.patch('/api/settings/', {'cashier_can_topup': False}, format='json').status_code, 403)

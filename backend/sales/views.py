@@ -10,6 +10,7 @@ from .serializers import SaleCreateSerializer
 from .services import build_receipt, create_sale, reprint_receipt, build_receipt_for
 from django.utils import timezone
 from utang.models import UtangPayment
+from wallets.models import LoadTransaction
 # Create your views here.
 class SaleCreateView(APIView):
     permission_classes = [IsCashierOrOwner]
@@ -56,21 +57,29 @@ class RecentSalesView(APIView):
             receipts = receipts.filter(receipt_no__icontains=search)
         receipts = list(receipts.order_by('-id')[:30])
 
-        sales = Sale.objects.select_related('cashier').in_bulk(
-            [r.source_id for r in receipts if r.source == Receipt.Source.SALE])
-        payments = UtangPayment.objects.select_related('received_by').in_bulk(
-            [r.source_id for r in receipts if r.source == Receipt.Source.UTANG_PAYMENT])
+        def ids(source):
+            return [r.source_id for r in receipts if r.source == source]
+
+        sales = Sale.objects.select_related('cashier').in_bulk(ids(Receipt.Source.SALE))
+        payments = UtangPayment.objects.select_related('received_by').in_bulk(ids(Receipt.Source.UTANG_PAYMENT))
+        loads = LoadTransaction.objects.select_related('cashier').in_bulk(ids(Receipt.Source.LOAD))
+
+        def when(moment):
+            return timezone.localtime(moment).strftime('%Y-%m-%d %I:%M %p')
 
         rows = []
         for r in receipts:
             if r.source == Receipt.Source.SALE and r.source_id in sales:
                 s = sales[r.source_id]
-                rows.append({'receipt_no': s.receipt_no, 'cashier': s.cashier.username,
-                             'total': str(s.total), 'status': s.status, 'kind': 'sale',
-                             'date_time': timezone.localtime(s.timestamp).strftime('%Y-%m-%d %I:%M %p')})
+                rows.append({'receipt_no': s.receipt_no, 'cashier': s.cashier.username, 'total': str(s.total),
+                             'status': s.status, 'kind': 'sale', 'date_time': when(s.timestamp)})
             elif r.source == Receipt.Source.UTANG_PAYMENT and r.source_id in payments:
                 p = payments[r.source_id]
-                rows.append({'receipt_no': p.receipt_no, 'cashier': p.received_by.username,
-                             'total': str(p.amount), 'status': 'completed', 'kind': 'utang_payment',
-                             'date_time': timezone.localtime(p.timestamp).strftime('%Y-%m-%d %I:%M %p')})
+                rows.append({'receipt_no': p.receipt_no, 'cashier': p.received_by.username, 'total': str(p.amount),
+                             'status': 'completed', 'kind': 'utang_payment', 'date_time': when(p.timestamp)})
+            elif r.source == Receipt.Source.LOAD and r.source_id in loads:
+                t = loads[r.source_id]
+                rows.append({'receipt_no': t.receipt_no, 'cashier': t.cashier.username, 'total': str(t.price_charged),
+                             'status': 'voided' if t.status == 'failed' else 'completed', 'kind': 'load',
+                             'date_time': when(t.timestamp)})
         return Response(rows)

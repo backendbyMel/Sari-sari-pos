@@ -9,6 +9,7 @@ from sales.models import Sale
 
 from .models import Shift, ShiftReopen, CashMovement
 from utang.models import UtangPayment
+from wallets.models import LoadTransaction
 
 ZERO = Decimal('0')
 
@@ -56,16 +57,30 @@ def shift_totals(shift):
     collected = UtangPayment.objects.filter(shift=shift).aggregate(t=Sum('amount'))['t']
     payouts = CashMovement.objects.filter(shift=shift, type=CashMovement.Type.OUT)
     paid = payouts.aggregate(t=Sum('amount'))['t']
+    loads = LoadTransaction.objects.filter(shift=shift)
+    load_ok = loads.filter(status=LoadTransaction.Status.SUCCESS)
+    load_bad = loads.filter(status=LoadTransaction.Status.FAILED)
+    load_sales = load_ok.aggregate(t=Sum('price_charged'))['t']
+    load_bad_total = load_bad.aggregate(t=Sum('price_charged'))['t']
     return {
         'sales_count': sales.count(),
         'sales_total': everything or ZERO,
         'cash_sales': cash or ZERO,
         'utang_given': on_utang or ZERO,
         'utang_collected': collected or ZERO,
+        'load_sales': load_sales or ZERO,
+        'load_count': load_ok.count(),
+        'load_failed_count': load_bad.count(),
+        'load_failed_total': load_bad_total or ZERO,
         'payouts_total': paid or ZERO,
         'payouts_count': payouts.count(),
     }
 
+def expected_cash_for(shift, totals):
+    return (
+        shift.opening_cash + totals['cash_sales'] + totals['utang_collected']
+        + totals['load_sales'] - totals['payouts_total']
+    )
 
 @transaction.atomic
 def close_shift(*, shift_id, counted_cash, denominations, closed_by, reason=''):
@@ -76,9 +91,7 @@ def close_shift(*, shift_id, counted_cash, denominations, closed_by, reason=''):
         raise ValidationError({'shift': 'This shift is already closed.'})
 
     totals = shift_totals(shift)
-    expected = (
-        shift.opening_cash + totals['cash_sales'] + totals['utang_collected'] - totals['payouts_total']
-    )
+    expected = expected_cash_for(shift, totals)
 
     shift.expected_cash = expected
     shift.counted_cash = counted_cash
@@ -135,9 +148,7 @@ def record_payout(*, user, amount, reason):
         raise ValidationError({'shift': 'You have no open shift. Start your shift first.'})
 
     totals = shift_totals(shift)
-    drawer = (
-        shift.opening_cash + totals['cash_sales'] + totals['utang_collected'] - totals['payouts_total']
-    )
+    drawer = expected_cash_for(shift, totals)
     warnings = []
     if amount > drawer:
         warnings.append(

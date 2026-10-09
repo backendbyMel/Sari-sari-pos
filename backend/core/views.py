@@ -5,7 +5,7 @@ from accounts.permissions import IsCashierOrOwner, IsOwner
 
 from .serializers import SettingsSerializer
 from .services import (
-    current_settings, set_credit_limit_mode, set_default_credit_limit, set_idle_minutes,
+    current_settings, set_credit_limit_mode, set_default_credit_limit, set_idle_minutes, set_overdue_days, set_cashier_can_topup
 )
 
 # Create your views here.
@@ -32,4 +32,9 @@ class OwnerSettingsView(APIView):
             set_default_credit_limit(data['default_credit_limit'], request.user)
         if 'credit_limit_mode' in data:
             set_credit_limit_mode(data['credit_limit_mode'], request.user)
+
+        if 'overdue_days' in data:
+            set_overdue_days(data['overdue_days'], request.user)
+        if 'cashier_can_topup' in data:
+            set_cashier_can_topup(data['cashier_can_topup'], request.user)
         return Response(current_settings())

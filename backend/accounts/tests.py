@@ -26,6 +26,13 @@ OWNER_ONLY = [
     ('post', '/api/shifts/1/report/generate/'),
     ('get', '/api/settings/'),
     ('post', '/api/users/1/unlock-pin/'),
+    ('get', '/api/owner/customers/'),
+    ('get', '/api/owner/customers/1/'),
+    ('post', '/api/owner/customers/1/write-off/'),
+    ('get', '/api/owner/wallet/'),
+    ('post', '/api/owner/wallet/adjust/'),
+    ('get', '/api/owner/load-networks/'),
+    ('get', '/api/owner/load-products/'),
 ]
 LOGIN_REQUIRED = OWNER_ONLY + [
     ('get', '/api/auth/me/'),
@@ -46,6 +53,11 @@ LOGIN_REQUIRED = OWNER_ONLY + [
     ('post', '/api/customers/'),
     ('get', '/api/customers/1/'),
     ('post', '/api/utang/payments/'),
+    ('get', '/api/load/products/'),
+    ('get', '/api/load/mine/'),
+    ('post', '/api/load/send/'),
+    ('post', '/api/load/1/fail/'),
+    ('post', '/api/wallets/topup/'),
 ]
 
 

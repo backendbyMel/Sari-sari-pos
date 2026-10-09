@@ -11,6 +11,11 @@ CREDIT_LIMIT_KEY = 'default_credit_limit'
 DEFAULT_CREDIT_LIMIT = Decimal('500.00')
 CREDIT_MODE_KEY = 'credit_limit_mode'
 CREDIT_MODES = ('warn', 'block')
+OVERDUE_KEY = 'overdue_days'
+CASHIER_TOPUP_KEY = 'cashier_can_topup'
+DEFAULT_OVERDUE_DAYS = 30
+MIN_OVERDUE_DAYS = 1
+MAX_OVERDUE_DAYS = 365
 
 
 def _save(key, value, user):
@@ -18,7 +23,6 @@ def _save(key, value, user):
 
 
 def get_idle_minutes():
-    """The saved value, or 15 if nothing valid is saved (garbage never breaks the app)."""
     row = Setting.objects.filter(key=IDLE_KEY).first()
     try:
         minutes = int(row.value) if row else DEFAULT_IDLE_MINUTES
@@ -54,11 +58,31 @@ def get_credit_limit_mode():
 def set_credit_limit_mode(mode, user):
     _save(CREDIT_MODE_KEY, mode, user)
 
+def get_overdue_days():
+    row = Setting.objects.filter(key=OVERDUE_KEY).first()
+    try:
+        days = int(row.value) if row else DEFAULT_OVERDUE_DAYS
+    except ValueError:
+        return DEFAULT_OVERDUE_DAYS
+    return days if MIN_OVERDUE_DAYS <= days <= MAX_OVERDUE_DAYS else DEFAULT_OVERDUE_DAYS
+
+
+def set_overdue_days(days, user):
+    _save(OVERDUE_KEY, days, user)
+
+def get_cashier_can_topup():
+    row = Setting.objects.filter(key=CASHIER_TOPUP_KEY).first()
+    return bool(row and row.value == 'true')
+
+
+def set_cashier_can_topup(value, user):
+    _save(CASHIER_TOPUP_KEY, 'true' if value else 'false', user)
 
 def current_settings():
     return {
         'idle_logout_minutes': get_idle_minutes(),
-        # text, never a float: money is never a float in JSON
         'default_credit_limit': str(get_default_credit_limit().quantize(Decimal('0.01'))),
         'credit_limit_mode': get_credit_limit_mode(),
+        'overdue_days': get_overdue_days(),
+        'cashier_can_topup': get_cashier_can_topup(),
     }

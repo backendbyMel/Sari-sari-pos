@@ -26,3 +26,14 @@ class CustomerCreateSerializer(serializers.Serializer):
 class PaymentCreateSerializer(serializers.Serializer):
     customer = serializers.IntegerField(min_value=1)
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
+
+class OwnerCustomerPatchSerializer(serializers.Serializer):
+    credit_limit = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal('0'), required=False, allow_null=True
+    )
+    is_active = serializers.BooleanField(required=False)
+
+
+class WriteOffSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
+    reason = serializers.CharField(max_length=200) 

@@ -11,6 +11,8 @@ from .models import Receipt, ReceiptCounter, Sale, SaleItem
 from shifts.models import Shift
 from utang.credit import check_credit_limit
 from utang.models import Customer, UtangPayment
+from wallets.mobile import mask_mobile
+from wallets.models import LoadTransaction
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.01')
@@ -215,6 +217,33 @@ def build_payment_receipt(payment, *, is_copy=False):
         'is_copy': is_copy,
     }
 
+def build_load_receipt(tx, *, is_copy=False):
+    local_time = timezone.localtime(tx.timestamp)
+    return {
+        'kind': 'load',
+        'receipt_no': tx.receipt_no,
+        'store': _store_header(),
+        'date_time': local_time.strftime('%Y-%m-%d %I:%M %p'),
+        'cashier': tx.cashier.username,
+        'items': [],
+        'discount': '0.00',
+        'total': str(tx.price_charged),
+        'payment_type': 'load',
+        'cash_received': str(tx.price_charged),
+        'change': '0.00',
+        'customer': None,
+        'balance_after': None,
+        'load': {
+            'network': tx.network_name,
+            'product': tx.product_name,
+            'mobile': mask_mobile(tx.mobile_no),
+            'reference_no': tx.reference_no,
+        },
+        'is_void': False,
+        'is_failed': tx.status == LoadTransaction.Status.FAILED,
+        'is_copy': is_copy,
+    }
+
 
 def build_receipt_for(receipt, *, is_copy=False):
     if receipt.source == Receipt.Source.SALE:
@@ -223,6 +252,9 @@ def build_receipt_for(receipt, *, is_copy=False):
     if receipt.source == Receipt.Source.UTANG_PAYMENT:
         payment = UtangPayment.objects.select_related('customer', 'received_by').get(pk=receipt.source_id)
         return build_payment_receipt(payment, is_copy=is_copy)
+    if receipt.source == Receipt.Source.LOAD:
+        tx = LoadTransaction.objects.select_related('cashier').get(pk=receipt.source_id)
+        return build_load_receipt(tx, is_copy=is_copy)
     raise NotFound('Receipt not found.')
 
 

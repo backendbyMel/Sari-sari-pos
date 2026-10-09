@@ -5,7 +5,7 @@ from xml.sax.saxutils import escape
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Sum, Count
 from django.utils import timezone
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -19,6 +19,8 @@ from sales.models import Sale, SaleItem
 from .models import CashMovement, Shift, ShiftReport
 from .services import shift_totals
 from utang.models import UtangPayment
+from wallets.mobile import mask_mobile
+from wallets.models import LoadTransaction
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.01')
@@ -40,6 +42,21 @@ def build_report_data(shift, *, owner, report_no):
         for row in UtangPayment.objects.filter(shift=shift)
         .values('customer_id', 'customer__name').annotate(t=Sum('amount'))
         .order_by('customer__name', 'customer_id')
+    ]
+    loads_ok = LoadTransaction.objects.filter(shift=shift, status=LoadTransaction.Status.SUCCESS)
+    load_rows = []
+    for row in (loads_ok.values('network_name')
+                .annotate(count=Count('id'), amount=Sum('price_charged'), face=Sum('amount'), rebate=Sum('rebate'))
+                .order_by('network_name')):
+        entry = {'network': row['network_name'], 'count': row['count'], 'amount': row['amount']}
+        if owner: 
+            entry['profit'] = row['amount'] - row['face'] + row['rebate']
+        load_rows.append(entry)
+    load_failed = [
+        {'time': t.timestamp, 'network': t.network_name, 'product': t.product_name,
+         'mobile': mask_mobile(t.mobile_no), 'amount': t.price_charged, 'note': t.failed_note}
+        for t in LoadTransaction.objects.filter(shift=shift, status=LoadTransaction.Status.FAILED)
+        .order_by('timestamp', 'id')
     ]
 
     rows, product_ids = {}, set()
@@ -90,6 +107,9 @@ def build_report_data(shift, *, owner, report_no):
         'utang_collected': utang_collected,
         'utang_given_total': totals['utang_given'],
         'utang_collected_total': totals['utang_collected'],
+        'load_sales': totals['load_sales'],
+        'load_rows': load_rows,
+        'load_failed': load_failed,
         'payouts_total': totals['payouts_total'],
         'expected_cash': shift.expected_cash,
         'counted_cash': shift.counted_cash,
@@ -117,6 +137,7 @@ def build_report_data(shift, *, owner, report_no):
         data['previous_closing_cash'] = shift.previous_closing_cash
         data['opening_difference'] = shift.opening_difference
         data['reopen_count'] = shift.reopens.count()
+        data['load_profit'] = sum((r['profit'] for r in load_rows), ZERO)
     return data
 
 
@@ -192,20 +213,22 @@ def render_pdf(data):
                   P(f"Closed by {shift['closed_by']} on the cashier's behalf. Reason: {shift['close_reason']}")]
 
     summary = [['Transactions', str(data['sales_count'])], ['Total sales', php(data['sales_total'])],
-    ['  of which sold on utang', php(data['utang_given_total'])]]
+               ['  of which sold on utang', php(data['utang_given_total'])],
+               ['Mobile load sales (separate)', php(data['load_sales'])]]
     if owner:
         summary.append(['Gross profit on goods', php(data['total_profit'])])
-    story += [P('Summary', H2), grid(summary, [90, 90], right=(1,), header=False)]
+        summary.append(['Profit on mobile load', php(data['load_profit'])])
 
-    story += [P('Cash', H2), grid(
+        story += [P('Cash', H2), grid(
         [['Opening cash', php(data['opening_cash'])],
          ['+ Cash sales', php(data['cash_sales'])],
          ['+ Utang payments received', php(data['utang_collected_total'])],
+         ['+ Mobile load sales', php(data['load_sales'])],
          ['- Pay-outs', php(data['payouts_total'])],
          ['Expected cash', php(data['expected_cash'])],
          ['Counted cash', php(data['counted_cash'])],
          [f'Variance ({word})', signed(variance)]],
-        [90, 90], right=(1,), header=False, bold_rows=(4, 5, 6))]
+        [90, 90], right=(1,), header=False, bold_rows=(5, 6, 7))]
 
     if data['denominations']:
         counts = data['denominations']
@@ -233,6 +256,26 @@ def render_pdf(data):
     else:
         story.append(P('None.'))
     
+    story.append(P('Mobile load', H2))
+    if data['load_rows'] or data['load_failed']:
+        if data['load_rows']:
+            if owner:
+                rows = [['Network', 'Loads', 'Amount', 'Profit']]
+                rows += [[P(r['network']), str(r['count']), php(r['amount']), php(r['profit'])] for r in data['load_rows']]
+                story.append(grid(rows, [70, 25, 40, 45], right=(1, 2, 3)))
+            else:
+                rows = [['Network', 'Loads', 'Amount']]
+                rows += [[P(r['network']), str(r['count']), php(r['amount'])] for r in data['load_rows']]
+                story.append(grid(rows, [90, 40, 50], right=(1, 2)))
+        if data['load_failed']:
+            story += [Spacer(1, 2 * mm), P('Failed loads (wallet restored, cash refunded)', BOLD)]
+            rows = [['Time', 'Network', 'Load', 'Number', 'Amount', 'Note']]
+            rows += [[stamp(f['time']), P(f['network']), P(f['product']), f['mobile'], php(f['amount']), P(f['note'])]
+                     for f in data['load_failed']]
+            story.append(grid(rows, [30, 22, 28, 28, 27, 45], right=(4,)))
+    else:
+        story.append(P('None.'))
+          
     story.append(P('Items sold', H2))
     if data['items']:
         if owner:
@@ -290,7 +333,7 @@ def render_pdf(data):
         story += [P('Owner notes', H2), grid(rows, [90, 90], right=(1,), header=False)]
 
     story += [Spacer(1, 4 * mm),
-              P('Mobile load, e-wallet and spot-check sections will appear here once those features exist.', SMALL),
+              P('E-wallet and spot-check sections will appear here once those features exist.', SMALL),
               Spacer(1, 6 * mm)]
     signatures = Table([['', '', ''], ['Cashier signature', '', 'Owner signature']],
                        colWidths=[80 * mm, 20 * mm, 80 * mm], rowHeights=[16 * mm, None])

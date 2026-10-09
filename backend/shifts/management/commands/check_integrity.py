@@ -7,8 +7,9 @@ from inventory.models import Product, StockMovement
 from sales.models import Receipt, ReceiptCounter, Sale, SaleItem
 from shifts.models import CashMovement, Shift
 from shifts.reports import current_reports
-from shifts.services import shift_totals
-from utang.models import Customer, UtangPayment
+from shifts.services import shift_totals, expected_cash_for
+from utang.models import Customer, UtangPayment, BadDebtWriteOff
+from wallets.models import LoadTransaction, Wallet, WalletTransaction
 
 ZERO = Decimal('0')
 QTY = Decimal('0.001')
@@ -33,6 +34,7 @@ class Command(BaseCommand):
         self.check_receipts()
         self.check_shifts()
         self.check_customers()
+        self.check_wallets()
 
         for note in self.notes:
             self.stdout.write(f'note: {note}')
@@ -133,9 +135,7 @@ class Command(BaseCommand):
                 self.problems.append(f'{label} is closed but is missing its cash numbers.')
                 continue
             totals = shift_totals(s)
-            expected = (
-                s.opening_cash + totals['cash_sales'] + totals['utang_collected'] - totals['payouts_total']
-            )
+            expected = expected_cash_for(s, totals)
             if s.expected_cash != expected:
                 self.problems.append(
                     f'{label}: expected cash is saved as {s.expected_cash} but the records add up to {expected}.')
@@ -176,10 +176,11 @@ class Command(BaseCommand):
         charged = dict(
             Sale.objects.filter(payment_type=Sale.PaymentType.UTANG, status=Sale.Status.COMPLETED)
             .values_list('customer_id').annotate(t=Sum('total')).order_by('customer_id'))
-        paid = dict(
-            UtangPayment.objects.values_list('customer_id').annotate(t=Sum('amount')).order_by('customer_id'))
+        paid = dict(UtangPayment.objects.values_list('customer_id').annotate(t=Sum('amount')).order_by('customer_id'))
+        written = dict(BadDebtWriteOff.objects.values_list('customer_id').annotate(t=Sum('amount')).order_by('customer_id'))
+        # expected = charged.get(customer.pk, ZERO) - paid.get(customer.pk, ZERO) - written.get(customer.pk, ZERO)
         for customer in Customer.objects.all():
-            expected = charged.get(customer.pk, ZERO) - paid.get(customer.pk, ZERO)
+            expected = charged.get(customer.pk, ZERO) - paid.get(customer.pk, ZERO) - written.get(customer.pk, ZERO)
             if customer.balance != expected:
                 self.problems.append(
                     f'Customer {customer.name} (#{customer.pk}): the balance is {customer.balance} '
@@ -188,3 +189,36 @@ class Command(BaseCommand):
                 self.problems.append(f'Customer {customer.name} has a negative balance.')
         for sale in Sale.objects.filter(payment_type=Sale.PaymentType.UTANG, customer__isnull=True):
             self.problems.append(f'{sale.receipt_no} is a utang sale with no customer.')
+
+    def check_wallets(self):
+        for wallet in Wallet.objects.all():
+            running = ZERO
+            for entry in wallet.transactions.order_by('id'):
+                running += entry.amount
+                if entry.balance_after != running:
+                    self.problems.append(
+                        f'Wallet {wallet.provider}: entry #{entry.pk} says the balance became '
+                        f'{entry.balance_after} but the entries add up to {running}.')
+                    running = entry.balance_after
+            if wallet.balance != running:
+                self.problems.append(
+                    f'Wallet {wallet.provider}: the balance is {wallet.balance} but its entries end at {running}.')
+
+        loads = LoadTransaction.objects.all()
+        sent = WalletTransaction.objects.filter(type='load_sent').aggregate(t=Sum('amount'))['t'] or ZERO
+        face = loads.aggregate(t=Sum('amount'))['t'] or ZERO
+        if -sent != face:
+            self.problems.append(f'Loads sold add up to {face} but the wallet was reduced by {-sent}.')
+        restored = WalletTransaction.objects.filter(wallet__type='load', type='reversal').aggregate(t=Sum('amount'))['t'] or ZERO
+        failed_face = loads.filter(status='failed').aggregate(t=Sum('amount'))['t'] or ZERO
+        if restored != failed_face:
+            self.problems.append(f'Failed loads add up to {failed_face} but {restored} was put back in the wallet.')
+        for tx in loads.filter(status='failed', failed_note=''):
+            self.problems.append(f'Load {tx.receipt_no} is failed but has no note.')
+        for tx in loads:
+            if not Receipt.objects.filter(source='load', source_id=tx.pk, receipt_no=tx.receipt_no).exists():
+                self.problems.append(f'Load {tx.receipt_no} has no receipt record.')
+        late = LoadTransaction.objects.filter(
+            shift_id__gte=self.from_shift, shift__status=Shift.Status.CLOSED, timestamp__gt=F('shift__end_time'))
+        for tx in late:
+            self.problems.append(f'Load {tx.receipt_no} was saved after its shift was closed.')

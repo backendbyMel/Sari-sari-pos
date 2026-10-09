@@ -11,7 +11,7 @@ from sales.services import build_payment_receipt
 
 from .models import Customer, UtangPayment
 from .serializers import CustomerCreateSerializer, CustomerSerializer, PaymentCreateSerializer
-from .services import record_payment, register_customer
+from .services import record_payment, register_customer, history_for
 
 # Create your views here.
 def serialize(customers, many=False):
@@ -42,24 +42,7 @@ class CustomerDetailView(APIView):
 
     def get(self, request, pk):
         customer = get_object_or_404(Customer, pk=pk)
-        charges = Sale.objects.filter(
-            customer=customer, payment_type=Sale.PaymentType.UTANG
-        ).select_related('cashier').order_by('-timestamp')[:50]
-        payments = UtangPayment.objects.filter(customer=customer).select_related('received_by')[:50]
-
-        history = [
-            {'kind': 'charge', 'receipt_no': s.receipt_no, 'amount': str(s.total),
-             'balance_after': str(s.customer_balance_after), 'status': s.status,
-             'by': s.cashier.username, 'timestamp': s.timestamp}
-            for s in charges
-        ] + [
-            {'kind': 'payment', 'receipt_no': p.receipt_no, 'amount': str(p.amount),
-             'balance_after': str(p.balance_after), 'status': 'completed',
-             'by': p.received_by.username, 'timestamp': p.timestamp}
-            for p in payments
-        ]
-        history.sort(key=lambda h: h['timestamp'], reverse=True)
-        return Response({'customer': serialize(customer), 'history': history[:50]})
+        return Response({'customer': serialize(customer), 'history': history_for(customer)})
 
 
 class UtangPaymentView(APIView):

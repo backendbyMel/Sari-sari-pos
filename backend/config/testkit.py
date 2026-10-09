@@ -63,3 +63,17 @@ def make_customer(name='Aling Nena', contact='0917 000 0000', balance='0', limit
         name=name, contact=contact, balance=Decimal(balance), created_by=registrar,
         credit_limit=None if limit is None else Decimal(limit),
     )
+
+def make_load(rebate='4.00'):
+    from wallets.models import LoadNetwork, LoadProduct
+    network = LoadNetwork.objects.create(name='Smart', rebate_percent=Decimal(rebate))
+    product = LoadProduct.objects.create(
+        network=network, name='Load 50', face_value=Decimal('50'), selling_price=Decimal('52.00'))
+    return network, product
+
+
+def fund_wallet(owner, amount='1000'):
+    response = client_for(owner).post('/api/wallets/topup/', {
+        'amount_added': amount, 'amount_paid': amount, 'source': 'owner_cash'}, format='json')
+    assert response.status_code == 201, response.data
+    return response

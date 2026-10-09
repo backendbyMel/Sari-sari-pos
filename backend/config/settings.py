@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'shifts',
     'core',
     'utang',
+    'wallets',
 ]
 
 MIDDLEWARE = [
