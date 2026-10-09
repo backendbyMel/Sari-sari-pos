@@ -54,3 +54,12 @@ def make_candy(stock='100'):
 def open_shift(cashier, opening_cash='1000.00'):
     from shifts.models import Shift
     return Shift.objects.create(cashier=cashier, opening_cash=Decimal(opening_cash))
+
+
+def make_customer(name='Aling Nena', contact='0917 000 0000', balance='0', limit=None):
+    from utang.models import Customer
+    registrar, _ = User.objects.get_or_create(username='registrar', defaults={'role': 'CASHIER'})
+    return Customer.objects.create(
+        name=name, contact=contact, balance=Decimal(balance), created_by=registrar,
+        credit_limit=None if limit is None else Decimal(limit),
+    )

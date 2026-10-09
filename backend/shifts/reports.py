@@ -18,6 +18,7 @@ from sales.models import Sale, SaleItem
 
 from .models import CashMovement, Shift, ShiftReport
 from .services import shift_totals
+from utang.models import UtangPayment
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.01')
@@ -28,6 +29,18 @@ def build_report_data(shift, *, owner, report_no):
     totals = shift_totals(shift)
     completed = Sale.objects.filter(shift=shift, status=Sale.Status.COMPLETED)
     voided = Sale.objects.filter(shift=shift, status=Sale.Status.VOIDED)
+    utang_given = [
+        {'customer': row['customer__name'], 'amount': row['t']}
+        for row in completed.filter(payment_type=Sale.PaymentType.UTANG)
+        .values('customer_id', 'customer__name').annotate(t=Sum('total'))
+        .order_by('customer__name', 'customer_id')
+    ]
+    utang_collected = [
+        {'customer': row['customer__name'], 'amount': row['t']}
+        for row in UtangPayment.objects.filter(shift=shift)
+        .values('customer_id', 'customer__name').annotate(t=Sum('amount'))
+        .order_by('customer__name', 'customer_id')
+    ]
 
     rows, product_ids = {}, set()
     items = (
@@ -73,6 +86,10 @@ def build_report_data(shift, *, owner, report_no):
         ],
         'opening_cash': shift.opening_cash,
         'cash_sales': totals['cash_sales'],
+                'utang_given': utang_given,
+        'utang_collected': utang_collected,
+        'utang_given_total': totals['utang_given'],
+        'utang_collected_total': totals['utang_collected'],
         'payouts_total': totals['payouts_total'],
         'expected_cash': shift.expected_cash,
         'counted_cash': shift.counted_cash,
@@ -174,7 +191,8 @@ def render_pdf(data):
         story += [Spacer(1, 2 * mm),
                   P(f"Closed by {shift['closed_by']} on the cashier's behalf. Reason: {shift['close_reason']}")]
 
-    summary = [['Transactions', str(data['sales_count'])], ['Total sales', php(data['sales_total'])]]
+    summary = [['Transactions', str(data['sales_count'])], ['Total sales', php(data['sales_total'])],
+    ['  of which sold on utang', php(data['utang_given_total'])]]
     if owner:
         summary.append(['Gross profit on goods', php(data['total_profit'])])
     story += [P('Summary', H2), grid(summary, [90, 90], right=(1,), header=False)]
@@ -182,11 +200,12 @@ def render_pdf(data):
     story += [P('Cash', H2), grid(
         [['Opening cash', php(data['opening_cash'])],
          ['+ Cash sales', php(data['cash_sales'])],
+         ['+ Utang payments received', php(data['utang_collected_total'])],
          ['- Pay-outs', php(data['payouts_total'])],
          ['Expected cash', php(data['expected_cash'])],
          ['Counted cash', php(data['counted_cash'])],
          [f'Variance ({word})', signed(variance)]],
-        [90, 90], right=(1,), header=False, bold_rows=(3, 4, 5))]
+        [90, 90], right=(1,), header=False, bold_rows=(4, 5, 6))]
 
     if data['denominations']:
         counts = data['denominations']
@@ -199,6 +218,21 @@ def render_pdf(data):
             rows.append(['Coins (total)', '', php(Decimal(counts['coins']))])
         story += [P('Cash count by denomination', H2), grid(rows, [70, 40, 70], right=(1, 2))]
 
+    story.append(P('Utang (credit)', H2))
+    if data['utang_given'] or data['utang_collected']:
+        if data['utang_given']:
+            rows = [['Utang given to', 'Amount']]
+            rows += [[P(r['customer']), php(r['amount'])] for r in data['utang_given']]
+            rows.append(['TOTAL GIVEN', php(data['utang_given_total'])])
+            story += [grid(rows, [110, 70], right=(1,), bold_rows=(len(rows) - 1,)), Spacer(1, 2 * mm)]
+        if data['utang_collected']:
+            rows = [['Utang collected from', 'Amount']]
+            rows += [[P(r['customer']), php(r['amount'])] for r in data['utang_collected']]
+            rows.append(['TOTAL COLLECTED', php(data['utang_collected_total'])])
+            story.append(grid(rows, [110, 70], right=(1,), bold_rows=(len(rows) - 1,)))
+    else:
+        story.append(P('None.'))
+    
     story.append(P('Items sold', H2))
     if data['items']:
         if owner:
@@ -256,7 +290,7 @@ def render_pdf(data):
         story += [P('Owner notes', H2), grid(rows, [90, 90], right=(1,), header=False)]
 
     story += [Spacer(1, 4 * mm),
-              P('Utang, mobile load, e-wallet and spot-check sections will appear here once those features exist.', SMALL),
+              P('Mobile load, e-wallet and spot-check sections will appear here once those features exist.', SMALL),
               Spacer(1, 6 * mm)]
     signatures = Table([['', '', ''], ['Cashier signature', '', 'Owner signature']],
                        colWidths=[80 * mm, 20 * mm, 80 * mm], rowHeights=[16 * mm, None])

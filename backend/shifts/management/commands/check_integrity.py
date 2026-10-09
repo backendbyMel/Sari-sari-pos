@@ -8,6 +8,7 @@ from sales.models import Receipt, ReceiptCounter, Sale, SaleItem
 from shifts.models import CashMovement, Shift
 from shifts.reports import current_reports
 from shifts.services import shift_totals
+from utang.models import Customer, UtangPayment
 
 ZERO = Decimal('0')
 QTY = Decimal('0.001')
@@ -31,6 +32,7 @@ class Command(BaseCommand):
         self.check_sales()
         self.check_receipts()
         self.check_shifts()
+        self.check_customers()
 
         for note in self.notes:
             self.stdout.write(f'note: {note}')
@@ -91,16 +93,24 @@ class Command(BaseCommand):
     def check_receipts(self):
         receipts = list(Receipt.objects.all())
         sale_numbers = dict(Sale.objects.values_list('id', 'receipt_no'))
-        covered = set()
+        payment_numbers = dict(UtangPayment.objects.values_list('id', 'receipt_no'))
+        covered_sales, covered_payments = set(), set()
         for r in receipts:
             if r.source == Receipt.Source.SALE:
-                covered.add(r.source_id)
+                covered_sales.add(r.source_id)
                 if sale_numbers.get(r.source_id) != r.receipt_no:
                     self.problems.append(f'Receipt {r.receipt_no} does not match any sale.')
+            elif r.source == Receipt.Source.UTANG_PAYMENT:
+                covered_payments.add(r.source_id)
+                if payment_numbers.get(r.source_id) != r.receipt_no:
+                    self.problems.append(f'Receipt {r.receipt_no} does not match any utang payment.')
         for sale_id, number in sale_numbers.items():
-            if sale_id not in covered:
+            if sale_id not in covered_sales:
                 self.problems.append(f'Sale {number} has no receipt record.')
-
+        for payment_id, number in payment_numbers.items():
+            if payment_id not in covered_payments:
+                self.problems.append(f'Utang payment {number} has no receipt record.')
+                
         numbers = sorted(int(r.receipt_no.rsplit('-', 1)[1]) for r in receipts)
         counter = ReceiptCounter.objects.first()
         if numbers:
@@ -123,7 +133,9 @@ class Command(BaseCommand):
                 self.problems.append(f'{label} is closed but is missing its cash numbers.')
                 continue
             totals = shift_totals(s)
-            expected = s.opening_cash + totals['cash_sales'] - totals['payouts_total']
+            expected = (
+                s.opening_cash + totals['cash_sales'] + totals['utang_collected'] - totals['payouts_total']
+            )
             if s.expected_cash != expected:
                 self.problems.append(
                     f'{label}: expected cash is saved as {s.expected_cash} but the records add up to {expected}.')
@@ -144,3 +156,35 @@ class Command(BaseCommand):
             timestamp__gt=F('shift__end_time'))
         for move in late_moves:
             self.problems.append(f'A pay-out of {move.amount} was recorded after shift #{move.shift_id} closed.')
+
+        late_payments = UtangPayment.objects.filter(
+            shift_id__gte=self.from_shift, shift__status=Shift.Status.CLOSED,
+            timestamp__gt=F('shift__end_time'))
+        for payment in late_payments:
+            self.problems.append(
+                f'Utang payment {payment.receipt_no} was saved after its shift was closed.')
+        
+        late_payments = UtangPayment.objects.filter(
+            shift_id__gte=self.from_shift, shift__status=Shift.Status.CLOSED,
+            timestamp__gt=F('shift__end_time'))
+        for payment in late_payments:
+            self.problems.append(
+                f'Utang payment {payment.receipt_no} was saved after its shift was closed.')
+
+        
+    def check_customers(self):
+        charged = dict(
+            Sale.objects.filter(payment_type=Sale.PaymentType.UTANG, status=Sale.Status.COMPLETED)
+            .values_list('customer_id').annotate(t=Sum('total')).order_by('customer_id'))
+        paid = dict(
+            UtangPayment.objects.values_list('customer_id').annotate(t=Sum('amount')).order_by('customer_id'))
+        for customer in Customer.objects.all():
+            expected = charged.get(customer.pk, ZERO) - paid.get(customer.pk, ZERO)
+            if customer.balance != expected:
+                self.problems.append(
+                    f'Customer {customer.name} (#{customer.pk}): the balance is {customer.balance} '
+                    f'but charges minus payments is {expected}.')
+            if customer.balance < 0:
+                self.problems.append(f'Customer {customer.name} has a negative balance.')
+        for sale in Sale.objects.filter(payment_type=Sale.PaymentType.UTANG, customer__isnull=True):
+            self.problems.append(f'{sale.receipt_no} is a utang sale with no customer.')

@@ -197,7 +197,8 @@ class ReceiptTests(TestCase):
 
     def test_recent_list_has_only_safe_fields(self):
         row = self.api.get('/api/sales/recent/').data[0]
-        self.assertEqual(set(row), {'receipt_no', 'cashier', 'total', 'status', 'date_time'})
+        # self.assertEqual(set(row), {'receipt_no', 'cashier', 'total', 'status', 'date_time'})
+        self.assertEqual(set(row), {'receipt_no', 'cashier', 'total', 'status', 'date_time', 'kind'})
 
 class ShiftRuleTests(TestCase):
     def setUp(self):

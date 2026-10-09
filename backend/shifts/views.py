@@ -43,6 +43,8 @@ def result_payload(shift, totals, report=None):
         'shift': ShiftResultSerializer(shift).data,
         'sales_count': totals['sales_count'],
         'cash_sales': money(totals['cash_sales']),
+        'utang_given': money(totals['utang_given']),
+        'utang_collected': money(totals['utang_collected']),
         'payouts_total': money(totals['payouts_total']),
         'payouts_count': totals['payouts_count'],
         'report': report_info(report),
@@ -190,6 +192,8 @@ class ShiftSummaryView(APIView):
             'shift': ShiftSerializer(shift).data,
             'sales_count': totals['sales_count'],
             'sales_total': money(totals['sales_total']),
+                        'utang_given': money(totals['utang_given']),
+            'utang_collected': money(totals['utang_collected']),
             'payouts_total': money(totals['payouts_total']),
             'payouts': CashMovementSerializer(payouts, many=True).data,
         })

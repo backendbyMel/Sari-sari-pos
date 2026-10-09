@@ -18,6 +18,8 @@ class User(AbstractUser):
         max_length=10, choices=Role.choices, default=Role.CASHIER
     )
     pin_hash = models.CharField(max_length=128, blank=True)
+    pin_failed_attempts = models.PositiveSmallIntegerField(default=0)
+    pin_locked = models.BooleanField(default=False)
 
     objects = CustomUserManager()
 

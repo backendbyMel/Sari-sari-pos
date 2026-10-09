@@ -31,6 +31,10 @@ class Sale(models.Model):
         'shifts.Shift', null=True, blank=True, on_delete=models.PROTECT,
         related_name='sales',
     )
+    customer = models.ForeignKey(
+        'utang.Customer', null=True, blank=True, on_delete=models.PROTECT, related_name='sales'
+    )
+    customer_balance_after = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     payment_type = models.CharField(
         max_length=10, choices=PaymentType.choices, default=PaymentType.CASH
     )

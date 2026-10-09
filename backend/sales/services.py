@@ -9,6 +9,9 @@ from inventory.models import Product, ProductUnit, StockMovement
 
 from .models import Receipt, ReceiptCounter, Sale, SaleItem
 from shifts.models import Shift
+from utang.credit import check_credit_limit
+from utang.models import Customer, UtangPayment
+
 ZERO = Decimal('0')
 MONEY = Decimal('0.01')
 QTY = Decimal('0.001')
@@ -36,7 +39,8 @@ def price_line(unit, quantity):
 
 
 @transaction.atomic
-def create_sale(*, cashier, items, payment_type, cash_received):
+def create_sale(*, cashier, items, payment_type, cash_received=None,
+                customer_id=None, confirm_over_limit=False):
     shift = (
         Shift.objects.select_for_update()
         .filter(cashier=cashier, status=Shift.Status.OPEN)
@@ -46,7 +50,14 @@ def create_sale(*, cashier, items, payment_type, cash_received):
         raise ValidationError(
             {'shift': 'You have no open shift. Start your shift before selling.'}
         )
-    
+
+    customer = None
+    if payment_type == Sale.PaymentType.UTANG:
+        if customer_id:
+            customer = Customer.objects.select_for_update().filter(pk=customer_id, is_active=True).first()
+        if customer is None:
+            raise ValidationError({'customer': 'Choose a registered customer for the utang.'})
+
     wanted = {}
     for line in items:
         unit_id = line['product_unit']
@@ -89,18 +100,31 @@ def create_sale(*, cashier, items, payment_type, cash_received):
         })
         total += line_total
 
-    cash_received = cash_received.quantize(MONEY, ROUND_HALF_UP)
-    if cash_received < total:
-        raise ValidationError(
-            {'cash_received': f'Cash received (₱{cash_received}) is less than the total (₱{total}).'}
-        )
+    
+    if customer is not None:
+        check_credit_limit(customer, total, confirm_over_limit)  
+        cash_received, change = ZERO, ZERO                      
+        balance_after = customer.balance + total
+    else:
+        if cash_received is None:
+            raise ValidationError({'cash_received': 'Enter the cash received.'})
+        cash_received = cash_received.quantize(MONEY, ROUND_HALF_UP)
+        if cash_received < total:
+            raise ValidationError(
+                {'cash_received': f'Cash received (\u20b1{cash_received}) is less than the total (\u20b1{total}).'}
+            )
+        change = cash_received - total
+        balance_after = None
 
     receipt_no = next_receipt_no()
     sale = Sale.objects.create(
         receipt_no=receipt_no, cashier=cashier, shift=shift, payment_type=payment_type,
-        total=total, discount=ZERO, cash_received=cash_received,
-        change=cash_received - total,
+        customer=customer, customer_balance_after=balance_after,
+        total=total, discount=ZERO, cash_received=cash_received, change=change,
     )
+    if customer is not None:
+        customer.balance = balance_after
+        customer.save(update_fields=['balance'])
 
     for line in lines:
         product = line['product']
@@ -136,13 +160,16 @@ def create_sale(*, cashier, items, payment_type, cash_received):
 def _qty_text(value):
     return format(value.normalize(), 'f')
 
+def _store_header():
+    return dict(settings.STORE)
 
 def build_receipt(sale, *, is_copy=False):
-    local_time = timezone.localtime(sale.timestamp)  # Asia/Manila
+    local_time = timezone.localtime(sale.timestamp) 
     items = sale.items.select_related('product', 'product_unit').order_by('id')
     return {
+        'kind': 'sale',
         'receipt_no': sale.receipt_no,
-        'store': dict(settings.STORE),
+        'store': _store_header(),
         'date_time': local_time.strftime('%Y-%m-%d %I:%M %p'),
         'cashier': sale.cashier.username,
         'items': [
@@ -160,27 +187,56 @@ def build_receipt(sale, *, is_copy=False):
         'payment_type': sale.payment_type,
         'cash_received': str(sale.cash_received),
         'change': str(sale.change),
+        'customer': {'name': sale.customer.name} if sale.customer_id else None,
+        'balance_after': str(sale.customer_balance_after) if sale.customer_id else None,
         'is_void': sale.status == Sale.Status.VOIDED,
         'is_copy': is_copy,
     }
 
+
+def build_payment_receipt(payment, *, is_copy=False):
+    """Receipt for money received on utang. Shows the customer and the REMAINING balance."""
+    local_time = timezone.localtime(payment.timestamp)
+    return {
+        'kind': 'utang_payment',
+        'receipt_no': payment.receipt_no,
+        'store': _store_header(),
+        'date_time': local_time.strftime('%Y-%m-%d %I:%M %p'),
+        'cashier': payment.received_by.username,
+        'items': [],
+        'discount': '0.00',
+        'total': str(payment.amount),
+        'payment_type': 'utang_payment',
+        'cash_received': str(payment.amount),
+        'change': '0.00',
+        'customer': {'name': payment.customer.name},
+        'balance_after': str(payment.balance_after),
+        'is_void': False,
+        'is_copy': is_copy,
+    }
+
+
+def build_receipt_for(receipt, *, is_copy=False):
+    if receipt.source == Receipt.Source.SALE:
+        sale = Sale.objects.select_related('cashier', 'customer').get(pk=receipt.source_id)
+        return build_receipt(sale, is_copy=is_copy)
+    if receipt.source == Receipt.Source.UTANG_PAYMENT:
+        payment = UtangPayment.objects.select_related('customer', 'received_by').get(pk=receipt.source_id)
+        return build_payment_receipt(payment, is_copy=is_copy)
+    raise NotFound('Receipt not found.')
+
+
 @transaction.atomic
 def reprint_receipt(receipt_no, user):
-    receipt = (
-        Receipt.objects.select_for_update()
-        .filter(receipt_no=receipt_no, source=Receipt.Source.SALE)
-        .first()
-    )
+    receipt = Receipt.objects.select_for_update().filter(receipt_no=receipt_no).first()
     if receipt is None:
         raise NotFound('Receipt not found.')
-
-    sale = Sale.objects.select_related('cashier').get(pk=receipt.source_id)
+    data = build_receipt_for(receipt, is_copy=True)
 
     receipt.reprint_log = receipt.reprint_log + [{
-        'user': user.username,                               
-        'at': timezone.localtime(timezone.now()).isoformat(), 
+        'user': user.username,                                
+        'at': timezone.localtime(timezone.now()).isoformat(),  
     }]
     receipt.printed_count += 1
     receipt.save(update_fields=['printed_count', 'reprint_log'])
-
-    return build_receipt(sale, is_copy=True)
+    return data

@@ -28,11 +28,11 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'role', 'is_active', 'has_pin',
+            'id', 'username', 'role', 'is_active', 'has_pin', 'pin_locked',
             'last_login', 'date_joined',
         ]
         read_only_fields = [
-            'id', 'username', 'role', 'has_pin', 'last_login', 'date_joined',
+            'id', 'username', 'role', 'has_pin', 'pin_locked', 'last_login', 'date_joined',
         ]
 
     def get_has_pin(self, obj):
@@ -74,4 +74,8 @@ class PasswordResetSerializer(serializers.Serializer):
 
 
 class PinSetSerializer(serializers.Serializer):
+    pin = serializers.RegexField(r'^\d{4,6}$', error_messages=PIN_FIELD_ERRORS)
+
+class PinLoginSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
     pin = serializers.RegexField(r'^\d{4,6}$', error_messages=PIN_FIELD_ERRORS)

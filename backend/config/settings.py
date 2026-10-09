@@ -56,6 +56,8 @@ INSTALLED_APPS = [
     'inventory',
     'sales',
     'shifts',
+    'core',
+    'utang',
 ]
 
 MIDDLEWARE = [
@@ -170,6 +172,7 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_THROTTLE_RATES': {
         'login': '10/min',
+        'pin_login': '10/min',
     },
 }
 

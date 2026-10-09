@@ -8,6 +8,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 from sales.models import Sale
 
 from .models import Shift, ShiftReopen, CashMovement
+from utang.models import UtangPayment
 
 ZERO = Decimal('0')
 
@@ -50,13 +51,17 @@ def start_shift(*, cashier, opening_cash):
 def shift_totals(shift):
     sales = Sale.objects.filter(shift=shift, status=Sale.Status.COMPLETED)
     cash = sales.filter(payment_type=Sale.PaymentType.CASH).aggregate(t=Sum('total'))['t']
+    on_utang = sales.filter(payment_type=Sale.PaymentType.UTANG).aggregate(t=Sum('total'))['t']
     everything = sales.aggregate(t=Sum('total'))['t']
+    collected = UtangPayment.objects.filter(shift=shift).aggregate(t=Sum('amount'))['t']
     payouts = CashMovement.objects.filter(shift=shift, type=CashMovement.Type.OUT)
     paid = payouts.aggregate(t=Sum('amount'))['t']
     return {
         'sales_count': sales.count(),
         'sales_total': everything or ZERO,
         'cash_sales': cash or ZERO,
+        'utang_given': on_utang or ZERO,
+        'utang_collected': collected or ZERO,
         'payouts_total': paid or ZERO,
         'payouts_count': payouts.count(),
     }
@@ -71,7 +76,9 @@ def close_shift(*, shift_id, counted_cash, denominations, closed_by, reason=''):
         raise ValidationError({'shift': 'This shift is already closed.'})
 
     totals = shift_totals(shift)
-    expected = shift.opening_cash + totals['cash_sales'] - totals['payouts_total']
+    expected = (
+        shift.opening_cash + totals['cash_sales'] + totals['utang_collected'] - totals['payouts_total']
+    )
 
     shift.expected_cash = expected
     shift.counted_cash = counted_cash
@@ -128,7 +135,9 @@ def record_payout(*, user, amount, reason):
         raise ValidationError({'shift': 'You have no open shift. Start your shift first.'})
 
     totals = shift_totals(shift)
-    drawer = shift.opening_cash + totals['cash_sales'] - totals['payouts_total']
+    drawer = (
+        shift.opening_cash + totals['cash_sales'] + totals['utang_collected'] - totals['payouts_total']
+    )
     warnings = []
     if amount > drawer:
         warnings.append(
