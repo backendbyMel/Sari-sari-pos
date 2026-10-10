@@ -10,7 +10,7 @@ from .serializers import SaleCreateSerializer
 from .services import build_receipt, create_sale, reprint_receipt, build_receipt_for
 from django.utils import timezone
 from utang.models import UtangPayment
-from wallets.models import LoadTransaction
+from wallets.models import LoadTransaction, EWalletTransaction
 # Create your views here.
 class SaleCreateView(APIView):
     permission_classes = [IsCashierOrOwner]
@@ -63,6 +63,7 @@ class RecentSalesView(APIView):
         sales = Sale.objects.select_related('cashier').in_bulk(ids(Receipt.Source.SALE))
         payments = UtangPayment.objects.select_related('received_by').in_bulk(ids(Receipt.Source.UTANG_PAYMENT))
         loads = LoadTransaction.objects.select_related('cashier').in_bulk(ids(Receipt.Source.LOAD))
+        ewallets = EWalletTransaction.objects.select_related('cashier').in_bulk(ids(Receipt.Source.EWALLET))
 
         def when(moment):
             return timezone.localtime(moment).strftime('%Y-%m-%d %I:%M %p')
@@ -82,4 +83,10 @@ class RecentSalesView(APIView):
                 rows.append({'receipt_no': t.receipt_no, 'cashier': t.cashier.username, 'total': str(t.price_charged),
                              'status': 'voided' if t.status == 'failed' else 'completed', 'kind': 'load',
                              'date_time': when(t.timestamp)})
+            elif r.source == Receipt.Source.EWALLET and r.source_id in ewallets:
+                e = ewallets[r.source_id]
+                cash = e.amount + e.fee if e.type == 'cash_in' else e.amount - e.fee
+                rows.append({'receipt_no': e.receipt_no, 'cashier': e.cashier.username, 'total': str(cash),
+                             'status': 'voided' if e.status == 'reversed' else 'completed', 'kind': 'ewallet',
+                             'date_time': when(e.timestamp)})
         return Response(rows)

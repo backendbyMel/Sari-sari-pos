@@ -15,4 +15,5 @@ urlpatterns = [
     path('shifts/<int:pk>/payouts/', views.ShiftPayoutsOwnerView.as_view(), name='shift-payouts-owner'),
     path('shifts/<int:pk>/report/', views.ShiftReportDownloadView.as_view(), name='shift-report'),
     path('shifts/<int:pk>/report/generate/', views.ShiftReportGenerateView.as_view(), name='shift-report-generate'),
+    path('shifts/wallets-to-check/', views.WalletsToCheckView.as_view(), name='wallets-to-check'),
 ]

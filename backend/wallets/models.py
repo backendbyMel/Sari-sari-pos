@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db.models import F, Q
 
 ZERO = Decimal('0')
 
@@ -146,3 +147,97 @@ class LoadTransaction(models.Model):
 
     def __str__(self):
         return f'{self.network_name} {self.product_name} ({self.status})'
+
+class FeeRule(models.Model):
+    wallet = models.ForeignKey(Wallet, on_delete=models.PROTECT, related_name='fee_rules')
+    min_amount = models.PositiveIntegerField()
+    max_amount = models.PositiveIntegerField()
+    fee = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(ZERO)])
+
+    class Meta:
+        ordering = ['wallet', 'min_amount']
+        constraints = [
+            models.CheckConstraint(condition=Q(min_amount__lte=F('max_amount')), name='fee_range_valid'),
+        ]
+
+    def __str__(self):
+        return f'{self.min_amount}-{self.max_amount}: {self.fee}'
+
+
+class EWalletTransaction(models.Model):
+    class Type(models.TextChoices):
+        CASH_IN = 'cash_in', 'Cash in'
+        CASH_OUT = 'cash_out', 'Cash out'
+
+    class Status(models.TextChoices):
+        SUCCESS = 'success', 'Success'
+        REVERSED = 'reversed', 'Reversed'
+
+    wallet = models.ForeignKey(Wallet, on_delete=models.PROTECT, related_name='ewallet_transactions')
+    wallet_name = models.CharField(max_length=50)                             
+    type = models.CharField(max_length=8, choices=Type.choices)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    fee = models.DecimalField(max_digits=10, decimal_places=2)              
+    table_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True) 
+    fee_overridden = models.BooleanField(default=False)
+    fee_override_reason = models.CharField(max_length=200, blank=True)
+    customer_mobile = models.CharField(max_length=20)
+    reference_no = models.CharField(max_length=30)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.SUCCESS)
+    shift = models.ForeignKey('shifts.Shift', on_delete=models.PROTECT, related_name='ewallet_transactions')
+    cashier = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                                related_name='ewallet_transactions')
+    receipt_no = models.CharField(max_length=20, unique=True)
+    reversed_note = models.CharField(max_length=200, blank=True)
+    reversed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                    on_delete=models.PROTECT, related_name='+')
+    reversed_at = models.DateTimeField(null=True, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-timestamp', '-id']
+        constraints = [
+            models.UniqueConstraint(fields=['wallet', 'reference_no'], name='one_reference_per_wallet'),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding and EWalletTransaction.objects.filter(pk=self.pk, status='reversed').exists():
+            raise PermissionError('A reversed transaction cannot be changed.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError('GCash records cannot be deleted.')
+
+    def __str__(self):
+        return f'{self.wallet_name} {self.type} {self.amount} ({self.status})'
+
+
+class ShiftWalletCheck(models.Model):
+    shift = models.ForeignKey('shifts.Shift', on_delete=models.PROTECT, related_name='wallet_checks')
+    wallet = models.ForeignKey(Wallet, on_delete=models.PROTECT, related_name='shift_checks')
+
+    balance_start = models.DecimalField(max_digits=12, decimal_places=2)
+    expected_start = models.DecimalField(max_digits=12, decimal_places=2)
+    difference_start = models.DecimalField(max_digits=12, decimal_places=2)
+
+    balance_end = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    expected_end = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    difference_end = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['shift', 'wallet'], name='one_check_per_wallet_per_shift')]
+
+    def save(self, *args, **kwargs):
+        from shifts.models import Shift
+        if not self._state.adding and Shift.objects.filter(pk=self.shift_id, status='closed').exists():
+            raise PermissionError('The checks of a closed shift cannot be edited.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError('Wallet checks cannot be deleted.')
+
+    def __str__(self):
+        return f'Shift #{self.shift_id} {self.wallet.provider}'

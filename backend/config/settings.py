@@ -27,7 +27,7 @@ DEBUG = os.environ.get('DJANGO_DEBUG', '1') == '1'
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 if not SECRET_KEY:
     if DEBUG:
-        SECRET_KEY = 'dev-only-key-not-a-secret'
+        SECRET_KEY = 'dev-only-key-not-a-secret-but-long-enough-for-jwt'
     else:
         # A server with no secret key must refuse to start, not use a weak one.
         raise RuntimeError('Set the DJANGO_SECRET_KEY environment variable.')
@@ -206,3 +206,7 @@ STORE = {
 REPORTS_ROOT = BASE_DIR / 'reports'
 if 'test' in sys.argv:
     REPORTS_ROOT = Path(tempfile.mkdtemp(prefix='pos-test-reports-'))
+
+
+if 'test' in sys.argv:
+    PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']

@@ -77,3 +77,19 @@ def fund_wallet(owner, amount='1000'):
         'amount_added': amount, 'amount_paid': amount, 'source': 'owner_cash'}, format='json')
     assert response.status_code == 201, response.data
     return response
+
+
+def make_gcash():
+    from wallets.models import FeeRule
+    from wallets.services import get_ewallet
+    wallet = get_ewallet()
+    FeeRule.objects.create(wallet=wallet, min_amount=1, max_amount=500, fee=Decimal('10'))
+    FeeRule.objects.create(wallet=wallet, min_amount=501, max_amount=1000, fee=Decimal('20'))
+    return wallet
+
+
+def fund_ewallet(owner, amount='2000'):
+    response = client_for(owner).post('/api/wallets/topup/?kind=ewallet', {
+        'amount_added': amount, 'amount_paid': amount, 'source': 'owner_cash'}, format='json')
+    assert response.status_code == 201, response.data
+    return response

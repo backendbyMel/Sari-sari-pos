@@ -9,7 +9,7 @@ from shifts.models import CashMovement, Shift
 from shifts.reports import current_reports
 from shifts.services import shift_totals, expected_cash_for
 from utang.models import Customer, UtangPayment, BadDebtWriteOff
-from wallets.models import LoadTransaction, Wallet, WalletTransaction
+from wallets.models import LoadTransaction, Wallet, WalletTransaction, EWalletTransaction, ShiftWalletCheck
 
 ZERO = Decimal('0')
 QTY = Decimal('0.001')
@@ -35,6 +35,7 @@ class Command(BaseCommand):
         self.check_shifts()
         self.check_customers()
         self.check_wallets()
+        self.check_wallet_checks()
 
         for note in self.notes:
             self.stdout.write(f'note: {note}')
@@ -222,3 +223,53 @@ class Command(BaseCommand):
             shift_id__gte=self.from_shift, shift__status=Shift.Status.CLOSED, timestamp__gt=F('shift__end_time'))
         for tx in late:
             self.problems.append(f'Load {tx.receipt_no} was saved after its shift was closed.')
+
+        ew = EWalletTransaction.objects.all()
+        entries = WalletTransaction.objects.filter(wallet__type='ewallet')
+
+        def total(rows):
+            return rows.aggregate(t=Sum('amount'))['t'] or ZERO
+
+        ins, outs = ew.filter(type='cash_in'), ew.filter(type='cash_out')
+        if -total(entries.filter(type='cash_in')) != total(ins):
+            self.problems.append('GCash cash-ins do not match the wallet entries.')
+        if total(entries.filter(type='cash_out')) != total(outs):
+            self.problems.append('GCash cash-outs do not match the wallet entries.')
+        undone = total(ins.filter(status='reversed')) - total(outs.filter(status='reversed'))
+        if total(entries.filter(type='reversal')) != undone:
+            self.problems.append('GCash reversals do not match the wallet entries.')
+        for tx in ew.filter(status='reversed', reversed_note=''):
+            self.problems.append(f'GCash {tx.receipt_no} is reversed but has no note.')
+        for tx in ew.filter(fee_overridden=True, fee_override_reason=''):
+            self.problems.append(f'GCash {tx.receipt_no} has a different fee but no reason.')
+        for tx in ew:
+            if tx.fee > tx.amount:
+                self.problems.append(f'GCash {tx.receipt_no}: the fee is more than the amount.')
+            if not Receipt.objects.filter(source='ewallet', source_id=tx.pk, receipt_no=tx.receipt_no).exists():
+                self.problems.append(f'GCash {tx.receipt_no} has no receipt record.')
+        late = EWalletTransaction.objects.filter(
+            shift_id__gte=self.from_shift, shift__status=Shift.Status.CLOSED, timestamp__gt=F('shift__end_time'))
+        for tx in late:
+            self.problems.append(f'GCash {tx.receipt_no} was saved after its shift was closed.')
+
+    def check_wallet_checks(self):
+        checks = ShiftWalletCheck.objects.filter(shift_id__gte=self.from_shift).select_related('shift', 'wallet')
+        for c in checks:
+            label = f'Shift #{c.shift_id} {c.wallet.provider}'
+            if c.difference_start != c.balance_start - c.expected_start:
+                self.problems.append(f'{label}: the start gap is saved wrongly.')
+            if c.shift.status != Shift.Status.CLOSED:
+                continue
+            if None in (c.balance_end, c.expected_end, c.difference_end):
+                self.problems.append(f'{label}: the shift is closed but its wallet check has no end numbers.')
+                continue
+            moved = (
+                WalletTransaction.objects.filter(
+                    wallet_id=c.wallet_id, timestamp__gt=c.started_at, timestamp__lte=c.shift.end_time)
+                .aggregate(t=Sum('amount'))['t'] or ZERO
+            )
+            if c.expected_end != c.balance_start + moved:
+                self.problems.append(
+                    f'{label}: expected {c.expected_end} at the end but the entries add up to {c.balance_start + moved}.')
+            if c.difference_end != c.balance_end - c.expected_end:
+                self.problems.append(f'{label}: the end gap is saved wrongly.')

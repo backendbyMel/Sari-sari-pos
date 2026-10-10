@@ -18,13 +18,13 @@ export function AuthProvider({ children }) {
       .then(async (r) => {
         if (r.ok) {
           const me = await r.json()
-          saveAuth({ ...getAuth(), user: me })  
+          saveAuth({ ...getAuth(), user: me })   
           setUser(me)
         } else {
           logout()
         }
       })
-      .catch(() => {})  
+      .catch(() => {})   
       .finally(() => setChecking(false))
   }, [logout])
 
@@ -33,19 +33,17 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('auth-expired', logout)
   }, [logout])
 
-  async function login(username, password) {
+  async function submitLogin(path, body, wrong) {
     try {
-      const response = await fetch(`${API_URL}/auth/login/`, {
+      const response = await fetch(`${API_URL}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(body),
       })
       if (response.status === 429) {
         return { ok: false, error: 'Too many login attempts. Please wait a minute.' }
       }
-      if (!response.ok) {
-        return { ok: false, error: 'Wrong username or password.' }
-      }
+      if (!response.ok) return { ok: false, error: wrong }
       const data = await response.json()
       saveAuth({ access: data.access, refresh: data.refresh, user: data.user })
       setUser(data.user)
@@ -55,10 +53,19 @@ export function AuthProvider({ children }) {
     }
   }
 
+  const login = (username, password) =>
+    submitLogin('/auth/login/', { username, password }, 'Wrong username or password.')
+
+  const loginWithPin = (username, pin) =>
+    submitLogin(
+      '/auth/pin-login/', { username, pin },
+      'Wrong username or PIN. After 5 wrong tries the PIN is locked: use your password, or ask the owner.'
+    )
+
   if (checking) return <p style={{ padding: 24 }}>Loading...</p>
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, login, loginWithPin, logout }}>
       {children}
     </AuthContext.Provider>
   )

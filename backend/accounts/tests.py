@@ -33,6 +33,9 @@ OWNER_ONLY = [
     ('post', '/api/owner/wallet/adjust/'),
     ('get', '/api/owner/load-networks/'),
     ('get', '/api/owner/load-products/'),
+    ('get', '/api/owner/ewallet/'),
+    ('post', '/api/owner/ewallet/1/reverse/'),
+    ('get', '/api/owner/fee-rules/'),
 ]
 LOGIN_REQUIRED = OWNER_ONLY + [
     ('get', '/api/auth/me/'),
@@ -58,6 +61,11 @@ LOGIN_REQUIRED = OWNER_ONLY + [
     ('post', '/api/load/send/'),
     ('post', '/api/load/1/fail/'),
     ('post', '/api/wallets/topup/'),
+    ('get', '/api/ewallet/quote/?amount=100'),
+    ('get', '/api/ewallet/mine/'),
+    ('post', '/api/ewallet/cash-in/'),
+    ('post', '/api/ewallet/cash-out/'),
+    ('get', '/api/shifts/wallets-to-check/'),
 ]
 
 

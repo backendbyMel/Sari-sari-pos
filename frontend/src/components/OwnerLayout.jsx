@@ -9,6 +9,13 @@ const LINKS = [
   { to: '/owner/stock-history', label: 'Stock History' },
   { to: '/owner/users', label: 'Users' },
   { to: '/owner/shifts', label: 'Shifts' },
+  { to: '/owner/shift-reports', label: 'Shift Reports' },
+  { to: '/owner/settings', label: 'Settings' },
+  { to: '/owner/customers', label: 'Utang' },
+  { to: '/owner/wallet', label: 'Load wallet' },
+  { to: '/owner/load-setup', label: 'Load setup' },
+  { to: '/owner/gcash-wallet', label: 'GCash wallet' },
+  { to: '/owner/gcash', label: 'GCash fees' },
 ]
 
 export default function OwnerLayout() {

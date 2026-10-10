@@ -11,6 +11,9 @@ class ShiftStartSerializer(serializers.Serializer):
     opening_cash = serializers.DecimalField(
         max_digits=12, decimal_places=2, min_value=Decimal('0')
     )
+    wallet_balances = serializers.DictField(
+        child=serializers.CharField(allow_blank=True), required=False
+    )
 
 
 class ShiftSerializer(serializers.ModelSerializer):
@@ -58,7 +61,10 @@ class ShiftEndSerializer(serializers.Serializer):
         max_digits=12, decimal_places=2, min_value=Decimal('0'), required=False
     )
     denominations = serializers.DictField(child=serializers.CharField(), required=False)
-
+    wallet_balances = serializers.DictField(
+        child=serializers.CharField(allow_blank=True), required=False
+    )
+    
     def validate_denominations(self, value):
         clean = {}
         for key, raw in value.items():

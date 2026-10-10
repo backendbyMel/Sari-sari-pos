@@ -1,10 +1,14 @@
 import { useRef, useState } from 'react'
 import { PESO, peso, toCents } from '../utils'
+import { useWalletsToCheck } from '../useWalletsToCheck'
+import WalletBalanceFields, { walletsOk } from './WalletBalanceFields'
 
 const BILLS = ['1000', '500', '200', '100', '50', '20']
 const MONEY_OK = /^\d+(\.\d{1,2})?$/  
 
-export default function CashCountForm({ submitLabel, needReason = false, onSubmit }) {
+export default function CashCountForm({ submitLabel, needReason = false, onSubmit, walletShiftId }) {
+  const { wallets, error: walletError } = useWalletsToCheck(walletShiftId)
+  const [walletBalances, setWalletBalances] = useState({})
   const [mode, setMode] = useState('breakdown')   
   const [counts, setCounts] = useState({})        
   const [coins, setCoins] = useState('')
@@ -28,7 +32,8 @@ export default function CashCountForm({ submitLabel, needReason = false, onSubmi
     if (mode === 'breakdown' && !coinsOk) return setError('Coins must be an amount like 35.50.')
     if (mode === 'total' && !totalOk) return setError('Enter the counted total (up to 2 decimals).')
     if (needReason && !reason.trim()) return setError('Enter the reason. It is required and saved on the shift.')
-
+    if (!wallets) return setError('Still loading the wallets. Please wait a moment.')
+    if (!walletsOk(wallets, walletBalances)) return setError('Type the balance shown in each app (up to 2 decimals).')
     const ok = window.confirm(
       `Submit a count of ${peso(countedCents)}?\n\nThis closes the shift and it cannot be changed afterwards.`
     )
@@ -39,11 +44,12 @@ export default function CashCountForm({ submitLabel, needReason = false, onSubmi
         ? { denominations: { ...Object.fromEntries(BILLS.map((d) => [d, counts[d] || '0'])), coins: coins || '0' } }
         : { counted_cash: total }
     if (needReason) payload.reason = reason.trim()
+    payload.wallet_balances = walletBalances
 
     busyRef.current = true
     setBusy(true)
     setError('')
-    const message = await onSubmit(payload)   // '' means success
+    const message = await onSubmit(payload)  
     busyRef.current = false
     if (message) {
       setError(message)
@@ -106,6 +112,9 @@ export default function CashCountForm({ submitLabel, needReason = false, onSubmi
         Counted: <b>{peso(countedCents)}</b>
       </div>
 
+      {walletError && <p style={{ color: 'crimson' }}>{walletError}</p>}
+      {wallets && <WalletBalanceFields wallets={wallets} balances={walletBalances} onChange={setWalletBalances} />}
+
       {needReason && (
         <label style={{ display: 'block', margin: '8px 0' }}>
           Reason for closing on the cashier's behalf (required)
@@ -121,7 +130,7 @@ export default function CashCountForm({ submitLabel, needReason = false, onSubmi
 
       {error && <p style={{ color: 'crimson', fontSize: 16 }}>{error}</p>}
 
-      <button type="submit" disabled={busy} style={{ width: '100%', padding: 14, fontSize: 18 }}>
+      <button type="submit" disabled={busy || !wallets} style={{ width: '100%', padding: 14, fontSize: 18 }}>
         {busy ? 'Saving...' : submitLabel}
       </button>
     </form>

@@ -79,7 +79,7 @@ class ShiftReopen(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='+',
     )
     previous_close_reason = models.CharField(max_length=200, blank=True)
-
+    previous_wallet_checks = models.JSONField(null=True, blank=True)
     class Meta:
         ordering = ['-timestamp', '-id']
 

@@ -17,10 +17,10 @@ from inventory.models import Product, StockMovement
 from sales.models import Sale, SaleItem
 
 from .models import CashMovement, Shift, ShiftReport
-from .services import shift_totals
+from .services import shift_totals, wallet_check_rows
 from utang.models import UtangPayment
 from wallets.mobile import mask_mobile
-from wallets.models import LoadTransaction
+from wallets.models import LoadTransaction, EWalletTransaction
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.01')
@@ -46,16 +46,36 @@ def build_report_data(shift, *, owner, report_no):
     loads_ok = LoadTransaction.objects.filter(shift=shift, status=LoadTransaction.Status.SUCCESS)
     load_rows = []
     for row in (loads_ok.values('network_name')
-                .annotate(count=Count('id'), amount=Sum('price_charged'), face=Sum('amount'), rebate=Sum('rebate'))
+                .annotate(count=Count('id'), total_price=Sum('price_charged'),
+                          total_face=Sum('amount'), total_rebate=Sum('rebate'))
                 .order_by('network_name')):
-        entry = {'network': row['network_name'], 'count': row['count'], 'amount': row['amount']}
-        if owner: 
-            entry['profit'] = row['amount'] - row['face'] + row['rebate']
+        entry = {'network': row['network_name'], 'count': row['count'], 'amount': row['total_price']}
+        if owner:   
+            entry['profit'] = row['total_price'] - row['total_face'] + row['total_rebate']
         load_rows.append(entry)
     load_failed = [
         {'time': t.timestamp, 'network': t.network_name, 'product': t.product_name,
          'mobile': mask_mobile(t.mobile_no), 'amount': t.price_charged, 'note': t.failed_note}
         for t in LoadTransaction.objects.filter(shift=shift, status=LoadTransaction.Status.FAILED)
+        .order_by('timestamp', 'id')
+    ]
+    ew_ok = EWalletTransaction.objects.filter(shift=shift, status=EWalletTransaction.Status.SUCCESS)
+    ewallet_rows, fee_income = [], ZERO
+    for kind, label in (('cash_in', 'Cash in'), ('cash_out', 'Cash out')):
+        # agg = ew_ok.filter(type=kind).aggregate(count=Count('id'), amount=Sum('amount'), fees=Sum('fee'))
+        # if agg['count']:
+        #     row = {'label': label, 'count': agg['count'], 'amount': agg['amount']}
+        agg = ew_ok.filter(type=kind).aggregate(count=Count('id'), total=Sum('amount'), fees=Sum('fee'))
+        if agg['count']:
+            row = {'label': label, 'count': agg['count'], 'amount': agg['total']}
+            if owner:   
+                row['fees'] = agg['fees']
+                fee_income += agg['fees']
+            ewallet_rows.append(row)
+    ewallet_reversed = [
+        {'time': t.timestamp, 'label': 'Cash in' if t.type == 'cash_in' else 'Cash out',
+         'mobile': mask_mobile(t.customer_mobile), 'amount': t.amount, 'note': t.reversed_note}
+        for t in EWalletTransaction.objects.filter(shift=shift, status=EWalletTransaction.Status.REVERSED)
         .order_by('timestamp', 'id')
     ]
 
@@ -110,6 +130,11 @@ def build_report_data(shift, *, owner, report_no):
         'load_sales': totals['load_sales'],
         'load_rows': load_rows,
         'load_failed': load_failed,
+        'ewallet_in_received': totals['ewallet_in_received'],
+        'ewallet_out_net': totals['ewallet_out_net'],
+        'ewallet_rows': ewallet_rows,
+        'ewallet_reversed': ewallet_reversed,
+        'wallet_checks': wallet_check_rows(shift, owner=owner),
         'payouts_total': totals['payouts_total'],
         'expected_cash': shift.expected_cash,
         'counted_cash': shift.counted_cash,
@@ -138,6 +163,12 @@ def build_report_data(shift, *, owner, report_no):
         data['opening_difference'] = shift.opening_difference
         data['reopen_count'] = shift.reopens.count()
         data['load_profit'] = sum((r['profit'] for r in load_rows), ZERO)
+        data['fee_income'] = fee_income
+        data['fee_overrides'] = [
+            {'time': t.timestamp, 'cashier': t.cashier.username, 'amount': t.amount, 'table_fee': t.table_fee,
+             'charged': t.fee, 'reason': t.fee_override_reason}
+            for t in ew_ok.filter(fee_overridden=True).select_related('cashier').order_by('timestamp', 'id')
+        ]
     return data
 
 
@@ -215,21 +246,34 @@ def render_pdf(data):
     summary = [['Transactions', str(data['sales_count'])], ['Total sales', php(data['sales_total'])],
                ['  of which sold on utang', php(data['utang_given_total'])],
                ['Mobile load sales (separate)', php(data['load_sales'])]]
+
+    
+    
+
+
+    # summary.append(['Fees earned (GCash)', php(data['fee_income'])])   
+
+    
+
     if owner:
         summary.append(['Gross profit on goods', php(data['total_profit'])])
         summary.append(['Profit on mobile load', php(data['load_profit'])])
+        summary.append(['Fees earned (GCash)', php(data['fee_income'])])
+        
 
-        story += [P('Cash', H2), grid(
+    story += [P('Cash', H2), grid(
         [['Opening cash', php(data['opening_cash'])],
          ['+ Cash sales', php(data['cash_sales'])],
          ['+ Utang payments received', php(data['utang_collected_total'])],
          ['+ Mobile load sales', php(data['load_sales'])],
+         ['+ GCash cash in received', php(data['ewallet_in_received'])],
+         ['- GCash cash out paid', php(data['ewallet_out_net'])],
          ['- Pay-outs', php(data['payouts_total'])],
          ['Expected cash', php(data['expected_cash'])],
          ['Counted cash', php(data['counted_cash'])],
          [f'Variance ({word})', signed(variance)]],
-        [90, 90], right=(1,), header=False, bold_rows=(5, 6, 7))]
-
+        [90, 90], right=(1,), header=False, bold_rows=(7, 8, 9))]
+    
     if data['denominations']:
         counts = data['denominations']
         rows = [['Bills / coins', 'Count', 'Amount']]
@@ -275,7 +319,34 @@ def render_pdf(data):
             story.append(grid(rows, [30, 22, 28, 28, 27, 45], right=(4,)))
     else:
         story.append(P('None.'))
-          
+
+    story.append(P('GCash cash in / out', H2))
+    if data['ewallet_rows'] or data['ewallet_reversed']:
+        if data['ewallet_rows']:
+            if owner:
+                rows = [['Type', 'Count', 'Amount', 'Fees']]
+                rows += [[r['label'], str(r['count']), php(r['amount']), php(r['fees'])] for r in data['ewallet_rows']]
+                story.append(grid(rows, [50, 25, 50, 45], right=(1, 2, 3)))
+            else:
+                rows = [['Type', 'Count', 'Amount']]
+                rows += [[r['label'], str(r['count']), php(r['amount'])] for r in data['ewallet_rows']]
+                story.append(grid(rows, [70, 40, 70], right=(1, 2)))
+        if data['ewallet_reversed']:
+            story += [Spacer(1, 2 * mm), P('Reversed by the owner (wallet restored, cash returned)', BOLD)]
+            rows = [['Time', 'Type', 'Number', 'Amount', 'Note']]
+            rows += [[stamp(r['time']), r['label'], r['mobile'], php(r['amount']), P(r['note'])]
+                     for r in data['ewallet_reversed']]
+            story.append(grid(rows, [30, 22, 30, 28, 60], right=(3,)))
+        if owner and data['fee_overrides']:
+            story += [Spacer(1, 2 * mm), P('Fee overrides (owner only)', BOLD)]
+            rows = [['Time', 'Cashier', 'Amount', 'Table fee', 'Charged', 'Reason']]
+            rows += [[stamp(o['time']), o['cashier'], php(o['amount']),
+                      php(o['table_fee']) if o['table_fee'] is not None else 'none',
+                      php(o['charged']), P(o['reason'])] for o in data['fee_overrides']]
+            story.append(grid(rows, [28, 22, 24, 24, 24, 48], right=(2, 3, 4)))
+    else:
+        story.append(P('None.'))
+
     story.append(P('Items sold', H2))
     if data['items']:
         if owner:
@@ -301,6 +372,28 @@ def render_pdf(data):
         story.append(grid(rows, [110, 70]))
     else:
         story.append(P('None.'))
+
+    story.append(P('Wallet checks (balances shown in the apps)', H2))
+    if data['wallet_checks']:
+        def money_or_dash(value):
+            return '-' if value is None else php(Decimal(value))
+
+        def gap_or_dash(value):
+            return '-' if value is None else signed(Decimal(value))
+
+        if owner:
+            rows = [['Wallet', 'Counted at start', 'Start gap', 'Expected at end', 'Counted at end', 'End gap']]
+            rows += [[P(r['wallet']), money_or_dash(r['opening']), gap_or_dash(r['start_gap']),
+                      money_or_dash(r['expected']), money_or_dash(r['actual']), gap_or_dash(r['gap'])]
+                     for r in data['wallet_checks']]
+            story.append(grid(rows, [34, 30, 28, 30, 30, 28], right=(1, 2, 3, 4, 5)))
+        else:
+            rows = [['Wallet', 'Counted at start', 'Expected at end', 'Counted at end', 'Difference']]
+            rows += [[P(r['wallet']), money_or_dash(r['opening']), money_or_dash(r['expected']),
+                      money_or_dash(r['actual']), gap_or_dash(r['gap'])] for r in data['wallet_checks']]
+            story.append(grid(rows, [45, 35, 35, 35, 30], right=(1, 2, 3, 4)))
+    else:
+        story.append(P('Not checked in this shift.'))
 
     story.append(P('Drawer pay-outs', H2))
     if data['payouts']:
@@ -333,7 +426,7 @@ def render_pdf(data):
         story += [P('Owner notes', H2), grid(rows, [90, 90], right=(1,), header=False)]
 
     story += [Spacer(1, 4 * mm),
-              P('E-wallet and spot-check sections will appear here once those features exist.', SMALL),
+              P('Spot-check sections will appear here once that feature exists.', SMALL),
               Spacer(1, 6 * mm)]
     signatures = Table([['', '', ''], ['Cashier signature', '', 'Owner signature']],
                        colWidths=[80 * mm, 20 * mm, 80 * mm], rowHeights=[16 * mm, None])

@@ -15,7 +15,6 @@ export default function UsersPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [showDisabled, setShowDisabled] = useState(true)
-  // null, { mode: 'add' }, { mode: 'password', user }, or { mode: 'pin', user }
   const [panel, setPanel] = useState(null)
 
   const load = useCallback(async () => {
@@ -36,12 +35,11 @@ export default function UsersPage() {
 
   useEffect(() => { load() }, [load])
 
-  // One helper for every change. Returns '' on success, or a message to show.
   async function send(path, method, body) {
     try {
       const response = await apiFetch(path, { method, body: JSON.stringify(body) })
       if (response.ok) {
-        await load()   // always show what the server really saved
+        await load()   
         return ''
       }
       if (response.status === 400) return flattenErrors(await response.json()).join(' ')
@@ -89,6 +87,12 @@ export default function UsersPage() {
     else setNotice(`"${user.username}" is now ${next ? 'enabled' : 'disabled'}.`)
   }
 
+  async function unlockPin(user) {
+    setNotice('')
+    const message = await send(`/users/${user.id}/unlock-pin/`, 'POST', {})
+    if (message) setError(message)
+    else setNotice(`PIN unlocked for ${user.username}.`)
+  }
   const visible = users.filter((u) => showDisabled || u.is_active)
 
   return (
@@ -149,7 +153,11 @@ export default function UsersPage() {
                       {u.is_active ? 'Active' : 'Disabled'}
                     </span>
                   </td>
-                  <td style={cell}>{u.has_pin ? 'Set' : 'Not set'}</td>
+                  <td style={cell}>
+                    {u.pin_locked
+                      ? <b style={{ color: '#c0392b' }}>Locked</b>
+                      : u.has_pin ? 'Set' : 'Not set'}
+                  </td>
                   <td style={cell}>{when(u.last_login)}</td>
                   <td style={{ ...cell, whiteSpace: 'nowrap' }}>
                     <button style={btn} disabled={panel !== null} onClick={() => { setPanel({ mode: 'password', user: u }); setNotice('') }}>
@@ -158,6 +166,11 @@ export default function UsersPage() {
                     <button style={btn} disabled={panel !== null} onClick={() => { setPanel({ mode: 'pin', user: u }); setNotice('') }}>
                       {u.has_pin ? 'Change PIN' : 'Set PIN'}
                     </button>{' '}
+                    {u.pin_locked && (
+                      <>
+                        <button style={btn} onClick={() => unlockPin(u)}>Unlock PIN</button>{' '}
+                      </>
+                    )}
                     <button style={btn} onClick={() => toggleActive(u)}>
                       {u.is_active ? 'Disable' : 'Enable'}
                     </button>

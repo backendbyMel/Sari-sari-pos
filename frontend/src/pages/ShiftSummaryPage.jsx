@@ -78,6 +78,11 @@ export default function ShiftSummaryPage() {
           <div style={{ border: '1px solid #ccc', borderRadius: 8, padding: 14 }}>
             <Row label="Sales made" value={data.sales_count} />
             <Row label="Sales total" value={`${PESO}${data.sales_total}`} />
+            <Row label="Sold on utang" value={`${PESO}${data.utang_given}`} />
+            <Row label="Utang payments collected" value={`${PESO}${data.utang_collected}`} />
+            <Row label="Mobile load sales (cash)" value={`${PESO}${data.load_sales}`} />
+            <Row label="GCash cash in received" value={`${PESO}${data.ewallet_in}`} />
+            <Row label="GCash cash out paid" value={`${PESO}${data.ewallet_out}`} />
             <Row label="Money taken out (pay-outs)" value={`${PESO}${data.payouts_total}`} />
           </div>
 

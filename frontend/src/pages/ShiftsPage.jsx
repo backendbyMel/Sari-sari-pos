@@ -94,7 +94,7 @@ export default function ShiftsPage() {
                     You count the drawer yourself. Your name and the reason are saved on the shift
                     and shown in its report.
                   </p>
-                  <CashCountForm submitLabel="Submit count and close shift" needReason onSubmit={closeOnBehalf} />
+                  <CashCountForm submitLabel="Submit count and close shift" needReason onSubmit={closeOnBehalf} walletShiftId={open.id} />
                   <button onClick={() => setClosing(false)} style={{ marginTop: 8, padding: '6px 12px' }}>Cancel</button>
                 </div>
               )}
@@ -154,6 +154,15 @@ function ShiftRow({ shift: s, canReopen, reopening, onStartReopen, onCancelReope
   }
   if (s.closed_on_behalf) notes.push(`Closed by ${s.closed_by} on the cashier's behalf: "${s.close_reason}"`)
   if (s.reopen_count > 0) notes.push(`Reopened ${s.reopen_count} time(s).`)
+
+  ;(s.wallet_checks ?? []).forEach((w) => {
+    if (parseFloat(w.start_gap) !== 0) {
+      notes.push(`${w.wallet}: counted ${PESO}${w.opening} at the start, but the system expected ${PESO}${w.start_expected} (${signedPeso(toCents(w.start_gap))}).`)
+    }
+    if (w.gap !== null && parseFloat(w.gap) !== 0) {
+      notes.push(`${w.wallet}: ${signedPeso(toCents(w.gap))} at the end against what was expected.`)
+    }
+  })
 
   return (
     <>

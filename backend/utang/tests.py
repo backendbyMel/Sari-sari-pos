@@ -12,7 +12,7 @@ from shifts.models import Shift, ShiftReport
 from shifts.reports import build_report_data
 from utang.models import Customer, UtangPayment, BadDebtWriteOff
 from datetime import timedelta
-
+from django.utils import timezone
 
 # Create your tests here.
 class UtangBase(TestCase):

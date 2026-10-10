@@ -10,8 +10,8 @@ from .serializers import (
     ReasonSerializer, ShiftEndSerializer, ShiftOwnerCloseSerializer,
     ShiftResultSerializer, ShiftSerializer, ShiftStartSerializer,
 )
-from .services import close_shift, reopen_shift, start_shift, record_payout, shift_totals
-from django.db.models import Count, Sum
+from .services import close_shift, reopen_shift, start_shift, record_payout, shift_totals, wallet_check_rows, wallet_checks_for
+from django.db.models import Count, Sum, Q
 from rest_framework.exceptions import ValidationError, NotFound, PermissionDenied
 from decimal import Decimal
 from django.shortcuts import get_object_or_404
@@ -21,6 +21,7 @@ from pathlib import Path
 from django.conf import settings
 from django.http import FileResponse, Http404
 from .reports import current_reports, generate_shift_report
+from wallets.models import ShiftWalletCheck, Wallet
 # Create your views here.
 
 logger = logging.getLogger(__name__)
@@ -48,9 +49,13 @@ def result_payload(shift, totals, report=None):
         'load_sales': money(totals['load_sales']),
         'load_count': totals['load_count'],
         'load_failed_count': totals['load_failed_count'],
+        'ewallet_in': money(totals['ewallet_in_received']),
+        'ewallet_out': money(totals['ewallet_out_net']),
+        'ewallet_count': totals['ewallet_in_count'] + totals['ewallet_out_count'],
         'payouts_total': money(totals['payouts_total']),
         'payouts_count': totals['payouts_count'],
         'report': report_info(report),
+        'wallet_checks': wallet_check_rows(shift),
     }
 
 class ShiftStartView(APIView):
@@ -59,9 +64,13 @@ class ShiftStartView(APIView):
     def post(self, request):
         form = ShiftStartSerializer(data=request.data)
         form.is_valid(raise_exception=True)
+        # shift = start_shift(
+        #     cashier=request.user,   
+        #     opening_cash=form.validated_data['opening_cash'],
+        # )
         shift = start_shift(
-            cashier=request.user,   
-            opening_cash=form.validated_data['opening_cash'],
+            cashier=request.user, opening_cash=form.validated_data['opening_cash'],
+            wallet_balances=form.validated_data.get('wallet_balances'),
         )
         return Response(ShiftSerializer(shift).data, status=status.HTTP_201_CREATED)
 
@@ -92,6 +101,7 @@ class ShiftEndView(APIView):
         shift, totals = close_shift(
             shift_id=shift.pk, counted_cash=data['counted_cash'],
             denominations=data.get('denominations'), closed_by=request.user,
+            wallet_balances=data.get('wallet_balances'),
         )
         return Response(result_payload(shift, totals, make_report(shift)))
 
@@ -108,6 +118,7 @@ class ShiftOwnerCloseView(APIView):
             shift_id=pk, counted_cash=data['counted_cash'],
             denominations=data.get('denominations'), closed_by=request.user,
             reason=data['reason'],
+            wallet_balances=data.get('wallet_balances'),
         )
         return Response(result_payload(shift, totals, make_report(shift)))
 
@@ -141,7 +152,11 @@ class ShiftListView(APIView):
         if params.get('cashier', '').isdigit():
             shifts = shifts.filter(cashier_id=params['cashier'])
         if params.get('variance') == '1':
-            shifts = shifts.filter(variance__isnull=False).exclude(variance=0)
+            flagged = ShiftWalletCheck.objects.filter(
+                ~Q(difference_start=0) | (Q(difference_end__isnull=False) & ~Q(difference_end=0))
+            ).values('shift_id')
+            cash_off = Q(variance__isnull=False) & ~Q(variance=0)
+            shifts = shifts.filter(cash_off | Q(pk__in=flagged))
 
         shifts = list(shifts.order_by('-start_time', '-id')[:100])
         paid = {
@@ -151,6 +166,7 @@ class ShiftListView(APIView):
             ).values('shift').annotate(total=Sum('amount'), count=Count('id'))
         }
         reports = current_reports(shifts)
+        checks = wallet_checks_for(shifts, owner=True)
         rows = []
         for row in OwnerShiftSerializer(shifts, many=True).data:
             entry = dict(row)
@@ -158,6 +174,7 @@ class ShiftListView(APIView):
             entry['payouts_total'] = money(found['total']) if found else '0.00'
             entry['payouts_count'] = found['count'] if found else 0
             entry['report'] = report_info(reports.get(row['id']))
+            entry['wallet_checks'] = checks[row['id']]
             rows.append(entry)
         return Response(rows)
     
@@ -199,6 +216,8 @@ class ShiftSummaryView(APIView):
             'utang_collected': money(totals['utang_collected']),
             'load_sales': money(totals['load_sales']),
             'load_count': totals['load_count'],
+            'ewallet_in': money(totals['ewallet_in_received']),
+            'ewallet_out': money(totals['ewallet_out_net']),
             'payouts_total': money(totals['payouts_total']),
             'payouts': CashMovementSerializer(payouts, many=True).data,
         })
@@ -268,3 +287,29 @@ class ShiftReportGenerateView(APIView):
         if shift.status != Shift.Status.CLOSED:
             raise ValidationError({'shift': 'Only a closed shift has a report.'})
         return Response({'report': report_info(generate_shift_report(shift.pk))})
+
+class WalletsToCheckView(APIView):
+    permission_classes = [IsCashierOrOwner]
+
+    def get(self, request):
+        shift_id = request.query_params.get('shift')
+        if shift_id:
+            if not request.user.is_owner:
+                raise PermissionDenied('Only the owner can ask about another shift.')
+            if not shift_id.isdigit():
+                raise ValidationError({'shift': 'Use a shift number.'})
+            shift = get_object_or_404(Shift, pk=shift_id)
+        else:
+            shift = Shift.objects.filter(cashier=request.user, status=Shift.Status.OPEN).first()
+
+        if shift is not None:
+            mode = 'end'
+            wallets = [c.wallet for c in shift.wallet_checks.select_related('wallet')
+                       .order_by('wallet__type', 'wallet__provider')]
+        else:
+            mode = 'start'
+            wallets = list(Wallet.objects.filter(is_active=True).order_by('type', 'provider'))
+        return Response({
+            'mode': mode,
+            'wallets': [{'id': w.pk, 'provider': w.provider, 'type': w.type} for w in wallets],
+        })

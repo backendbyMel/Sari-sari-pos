@@ -45,7 +45,11 @@ export default function CashierHome() {
 
       <p style={{ fontSize: 20 }}><Link to="/sales"><b>Sales</b></Link></p>
       <p style={{ fontSize: 20 }}><Link to="/receipts">Receipts (reprint)</Link></p>
+      <p style={{ fontSize: 20 }}><Link to="/customers">Utang customers</Link></p>
+      <p style={{ fontSize: 20 }}><Link to="/load">Mobile load</Link></p>
+      <p style={{ fontSize: 20 }}><Link to="/gcash">GCash cash in / out</Link></p>
       <p style={{ fontSize: 20 }}><Link to="/price-check">Price Check</Link></p>
+      <p style={{ fontSize: 20 }}><Link to="/reports/mine">My past reports</Link></p>
     </div>
   )
 }

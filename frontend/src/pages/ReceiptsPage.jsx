@@ -128,7 +128,11 @@ export default function ReceiptsPage() {
             {sale.status === 'voided' && (
               <span style={{ color: '#c0392b', fontWeight: 'bold' }}> VOIDED</span>
             )}
-            <div style={{ color: '#555', fontSize: 14 }}>{sale.date_time} &middot; {sale.cashier}</div>
+            <div style={{ color: '#555', fontSize: 14 }}>
+              {sale.date_time} &middot; {sale.cashier}
+              {sale.kind && sale.kind !== 'sale' &&
+                ` \u00b7 ${({ utang_payment: 'utang payment', load: 'mobile load', ewallet: 'GCash' })[sale.kind] ?? sale.kind}`}
+            </div>
           </div>
           <b style={{ fontSize: 18 }}>{PESO}{sale.total}</b>
           <button style={{ padding: '8px 14px' }} onClick={() => openReceipt(sale.receipt_no)}>

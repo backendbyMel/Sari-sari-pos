@@ -4,6 +4,7 @@ import { apiFetch } from '../api'
 import ReceiptView from '../components/ReceiptView'
 import { PESO, flattenErrors, formatTime, peso, toCents } from '../utils'
 import { useCurrentShift } from '../useCurrentShift'
+import CustomerPicker from '../components/CustomerPicker'
 
 const QTY_OK = /^\d+(\.\d{1,3})?$/     
 const CASH_OK = /^\d+(\.\d{1,2})?$/    
@@ -39,7 +40,8 @@ function SalesScreen({ shift }) {
   const [saleError, setSaleError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null)    
-
+  const [payType, setPayType] = useState('cash')   
+  const [customer, setCustomer] = useState(null)
   const scanRef = useRef(null)
   const latest = useRef(0)                     
   const submittingRef = useRef(false)         
@@ -146,8 +148,8 @@ function SalesScreen({ shift }) {
   const cashValid = CASH_OK.test(cash)
   const cashCents = cashValid ? toCents(cash) : 0
   const canComplete =
-    computed.length > 0 && computed.every((l) => l.valid) &&
-    cashValid && cashCents >= totalCents && !submitting
+    computed.length > 0 && computed.every((l) => l.valid) && !submitting &&
+    (payType === 'utang' ? customer !== null : cashValid && cashCents >= totalCents)
 
   async function completeSale() {
     if (!canComplete || submittingRef.current) return
@@ -155,30 +157,55 @@ function SalesScreen({ shift }) {
     setSubmitting(true)
     setSaleError('')
 
-    try {
-      const response = await apiFetch('/sales/', {
-        method: 'POST',
-        body: JSON.stringify({
-          items: computed.map((l) => ({ product_unit: l.unitId, quantity: l.qty })),
-          payment_type: 'cash',
-          cash_received: (cashCents / 100).toFixed(2),
-        }),
-      })
+    const buildBody = (confirmed) =>
+      payType === 'utang'
+        ? {
+            items: computed.map((l) => ({ product_unit: l.unitId, quantity: l.qty })),
+            payment_type: 'utang',
+            customer: customer.id,
+            confirm_over_limit: confirmed,
+          }
+        : {
+            items: computed.map((l) => ({ product_unit: l.unitId, quantity: l.qty })),
+            payment_type: 'cash',
+            cash_received: (cashCents / 100).toFixed(2),
+          }
 
-      if (response.status === 201) {
-        setResult(await response.json())   
-        setLines([])
-        setCash('')
-        setPicks([])
-      } else if (response.status === 400) {
-        setSaleError(flattenErrors(await response.json()).join(' '))
-      } else if (response.status !== 401) {
-        setSaleError('Something went wrong. Check recent sales before trying again.')
+    try {
+      let confirmed = false
+      for (;;) {
+        const response = await apiFetch('/sales/', { method: 'POST', body: JSON.stringify(buildBody(confirmed)) })
+
+        if (response.status === 201) {
+          setResult(await response.json())  
+          setLines([])
+          setCash('')
+          setPicks([])
+          setCustomer(null)
+          setPayType('cash')
+          return
+        }
+        if (response.status === 409 && !confirmed) {
+          const info = await response.json()
+          const ok = window.confirm(
+            `${info.customer} already owes ${PESO}${info.balance} (limit ${PESO}${info.limit}).\n` +
+            `This sale of ${PESO}${info.total} would make it ${PESO}${info.would_be}.\n\nCharge it anyway?`
+          )
+          if (!ok) {
+            setSaleError('Not charged. Remove items, or choose another way to pay.')
+            return
+          }
+          confirmed = true
+          continue
+        }
+        if (response.status === 400) setSaleError(flattenErrors(await response.json()).join(' '))
+        else if (response.status !== 401) setSaleError('Something went wrong. Check recent receipts before trying again.')
+        return
       }
     } catch {
       setSaleError(
         'Connection lost. The sale may or may not have been saved. ' +
-        'Do NOT press Complete again until you have checked with the owner.'
+        'Do NOT press Complete again until you have checked Receipts.'
       )
     } finally {
       submittingRef.current = false
@@ -263,32 +290,51 @@ function SalesScreen({ shift }) {
           </div>
         </div>
 
-        {/* RIGHT: total, cash, complete */}
+        {/* RIGHT: total, payment, complete */}
         <div style={{ flex: '1 1 280px', border: '1px solid #ccc', borderRadius: 8, padding: 16 }}>
           <div style={{ color: '#555' }}>Estimated total</div>
           <div style={{ fontSize: 38, fontWeight: 'bold' }}>{peso(totalCents)}</div>
           <small style={{ color: '#777' }}>The exact total is calculated by the server.</small>
 
-          <label style={{ display: 'block', marginTop: 16 }}>
-            Cash received
-            <input
-              style={{ display: 'block', width: '100%', padding: 12, fontSize: 20, boxSizing: 'border-box' }}
-              inputMode="decimal"
-              value={cash}
-              onChange={(e) => setCash(e.target.value.replace(/[^\d.]/g, ''))}
-              onKeyDown={(e) => { if (e.key === 'Enter') completeSale() }}
-              placeholder="0.00"
-            />
-          </label>
+          <div style={{ display: 'flex', gap: 8, margin: '14px 0 4px' }}>
+            <button type="button" onClick={() => setPayType('cash')} disabled={payType === 'cash'} style={{ flex: 1, padding: 10 }}>
+              Cash
+            </button>
+            <button type="button" onClick={() => setPayType('utang')} disabled={payType === 'utang'} style={{ flex: 1, padding: 10 }}>
+              Utang
+            </button>
+          </div>
 
-          {cash && !cashValid && <p style={{ color: 'crimson' }}>Enter a valid amount (up to 2 decimals).</p>}
-          {cashValid && lines.length > 0 && cashCents < totalCents && (
-            <p style={{ color: 'crimson', fontSize: 18 }}>Short by {peso(totalCents - cashCents)}</p>
-          )}
-          {cashValid && lines.length > 0 && cashCents >= totalCents && (
-            <p style={{ color: '#1b7f3b', fontSize: 22, fontWeight: 'bold' }}>
-              Change: {peso(cashCents - totalCents)}
-            </p>
+          {payType === 'cash' ? (
+            <>
+              <label style={{ display: 'block', marginTop: 8 }}>
+                Cash received
+                <input
+                  style={{ display: 'block', width: '100%', padding: 12, fontSize: 20, boxSizing: 'border-box' }}
+                  inputMode="decimal"
+                  value={cash}
+                  onChange={(e) => setCash(e.target.value.replace(/[^\d.]/g, ''))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') completeSale() }}
+                  placeholder="0.00"
+                />
+              </label>
+              {cash && !cashValid && <p style={{ color: 'crimson' }}>Enter a valid amount (up to 2 decimals).</p>}
+              {cashValid && lines.length > 0 && cashCents < totalCents && (
+                <p style={{ color: 'crimson', fontSize: 18 }}>Short by {peso(totalCents - cashCents)}</p>
+              )}
+              {cashValid && lines.length > 0 && cashCents >= totalCents && (
+                <p style={{ color: '#1b7f3b', fontSize: 22, fontWeight: 'bold' }}>
+                  Change: {peso(cashCents - totalCents)}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <p style={{ color: '#555', margin: '8px 0 0' }}>
+                No cash changes hands. The amount is added to the customer's utang.
+              </p>
+              <CustomerPicker selected={customer} onSelect={setCustomer} onClear={() => setCustomer(null)} />
+            </>
           )}
 
           {saleError && <p style={{ color: 'crimson' }}>{saleError}</p>}
@@ -298,7 +344,7 @@ function SalesScreen({ shift }) {
             disabled={!canComplete}
             style={{ width: '100%', padding: 16, fontSize: 18, marginTop: 8 }}
           >
-            {submitting ? 'Saving...' : 'Complete sale'}
+            {submitting ? 'Saving...' : payType === 'utang' ? 'Charge to utang' : 'Complete sale'}
           </button>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>

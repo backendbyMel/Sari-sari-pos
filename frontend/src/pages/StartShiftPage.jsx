@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../api'
 import { useCurrentShift } from '../useCurrentShift'
 import { PESO, flattenErrors, formatTime } from '../utils'
+import WalletBalanceFields, { walletsOk } from '../components/WalletBalanceFields'
+import { useWalletsToCheck } from '../useWalletsToCheck'
 
 const MONEY_OK = /^\d+(\.\d{1,2})?$/   
 
@@ -42,20 +44,25 @@ export default function StartShiftPage() {
 
 function StartForm() {
   const navigate = useNavigate()
+  const { wallets, error: walletError } = useWalletsToCheck()
   const [cash, setCash] = useState('')
+  const [balances, setBalances] = useState({})
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const busyRef = useRef(false)  
+  const busyRef = useRef(false)   
 
   async function handleSubmit(event) {
     event.preventDefault()
-    if (busyRef.current) return
+    if (busyRef.current || !wallets) return
     if (!MONEY_OK.test(cash)) {
       return setError('Enter the cash you counted (0 or more, up to 2 decimals).')
     }
+    if (!walletsOk(wallets, balances)) {
+      return setError('Type the balance shown in each app (up to 2 decimals).')
+    }
     const ok = window.confirm(
       `Start your shift with ${PESO}${Number(cash).toFixed(2)} in the drawer?\n\n` +
-      'This amount cannot be changed afterwards.'
+      'The cash and the app balances cannot be changed afterwards.'
     )
     if (!ok) return
 
@@ -65,7 +72,7 @@ function StartForm() {
     try {
       const response = await apiFetch('/shifts/start/', {
         method: 'POST',
-        body: JSON.stringify({ opening_cash: cash }),
+        body: JSON.stringify({ opening_cash: cash, wallet_balances: balances }),
       })
       if (response.status === 201) {
         navigate('/sales', { replace: true })
@@ -80,6 +87,9 @@ function StartForm() {
       setBusy(false)
     }
   }
+
+  if (walletError) return <p style={{ color: 'crimson', fontSize: 18 }}>{walletError}</p>
+  if (!wallets) return <p>Loading...</p>
 
   return (
     <form onSubmit={handleSubmit}>
@@ -98,6 +108,7 @@ function StartForm() {
           autoFocus
         />
       </label>
+      <WalletBalanceFields wallets={wallets} balances={balances} onChange={setBalances} />
       {error && <p style={{ color: 'crimson', fontSize: 16 }}>{error}</p>}
       <button type="submit" disabled={busy} style={{ width: '100%', padding: 16, fontSize: 18, marginTop: 12 }}>
         {busy ? 'Starting...' : 'Start shift'}

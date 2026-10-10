@@ -12,7 +12,7 @@ from shifts.models import Shift
 from utang.credit import check_credit_limit
 from utang.models import Customer, UtangPayment
 from wallets.mobile import mask_mobile
-from wallets.models import LoadTransaction
+from wallets.models import LoadTransaction, EWalletTransaction
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.01')
@@ -244,6 +244,36 @@ def build_load_receipt(tx, *, is_copy=False):
         'is_copy': is_copy,
     }
 
+def build_ewallet_receipt(tx, *, is_copy=False):
+    local_time = timezone.localtime(tx.timestamp)
+    cash = tx.amount + tx.fee if tx.type == EWalletTransaction.Type.CASH_IN else tx.amount - tx.fee
+    return {
+        'kind': 'ewallet',
+        'receipt_no': tx.receipt_no,
+        'store': _store_header(),
+        'date_time': local_time.strftime('%Y-%m-%d %I:%M %p'),
+        'cashier': tx.cashier.username,
+        'items': [],
+        'discount': '0.00',
+        'total': str(cash),
+        'payment_type': 'ewallet',
+        'cash_received': str(cash),
+        'change': '0.00',
+        'customer': None,
+        'balance_after': None,
+        'ewallet': {
+            'service': tx.wallet_name,
+            'type': tx.type,
+            'amount': str(tx.amount),
+            'fee': str(tx.fee),
+            'mobile': mask_mobile(tx.customer_mobile),
+            'reference_no': tx.reference_no,
+        },
+        'is_void': False,
+        'is_failed': False,
+        'is_reversed': tx.status == EWalletTransaction.Status.REVERSED,
+        'is_copy': is_copy,
+    }
 
 def build_receipt_for(receipt, *, is_copy=False):
     if receipt.source == Receipt.Source.SALE:
@@ -255,6 +285,9 @@ def build_receipt_for(receipt, *, is_copy=False):
     if receipt.source == Receipt.Source.LOAD:
         tx = LoadTransaction.objects.select_related('cashier').get(pk=receipt.source_id)
         return build_load_receipt(tx, is_copy=is_copy)
+    if receipt.source == Receipt.Source.EWALLET:
+        tx = EWalletTransaction.objects.select_related('cashier').get(pk=receipt.source_id)
+        return build_ewallet_receipt(tx, is_copy=is_copy)
     raise NotFound('Receipt not found.')
 
 

@@ -1,24 +1,31 @@
 from django.db.models import Prefetch
 from django.utils import timezone
 from rest_framework import status, viewsets
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsCashierOrOwner, IsOwner
 from core.services import get_cashier_can_topup
-from sales.services import build_load_receipt
+from sales.services import build_load_receipt, build_ewallet_receipt
 from shifts.models import Shift
 
 from .mobile import mask_mobile
-from .models import LoadNetwork, LoadProduct, LoadTransaction
+from .models import LoadNetwork, LoadProduct, LoadTransaction, EWalletTransaction, FeeRule
 from .serializers import (
-    LoadFailSerializer, LoadNetworkSerializer, LoadProductSerializer, LoadSendSerializer,
-    LowLevelSerializer, TopUpSerializer, WalletAdjustSerializer,
+    EWalletReverseSerializer, EWalletSendSerializer, FeeRuleSerializer, LoadFailSerializer,
+    LoadNetworkSerializer, LoadProductSerializer, LoadSendSerializer, LowLevelSerializer,
+    TopUpSerializer, WalletAdjustSerializer,
 )
-from .services import adjust_wallet, fail_load, get_load_wallet, send_load, top_up
+from .services import adjust_wallet, fail_load, get_load_wallet, send_load, top_up, ewallet_transaction, fee_for, get_ewallet, reverse_ewallet, wallet_for
+from decimal import Decimal
 
 # Create your views here.
+def kind_of(request):
+    kind = request.query_params.get('kind', 'load')
+    if kind not in ('load', 'ewallet'):
+        raise ValidationError({'kind': 'Use kind=load or kind=ewallet.'})
+    return kind
 
 def load_row(tx):
     return {
@@ -86,6 +93,7 @@ class TopUpView(APIView):
     permission_classes = [IsCashierOrOwner]
 
     def post(self, request):
+        kind = kind_of(request)
         form = TopUpSerializer(data=request.data)
         form.is_valid(raise_exception=True)
         data = form.validated_data
@@ -97,7 +105,7 @@ class TopUpView(APIView):
                 raise PermissionDenied('Cashiers can only top up with cash from the drawer.')
         entry, warnings = top_up(
             user=user, amount_added=data['amount_added'], amount_paid=data['amount_paid'],
-            source=data['source'], reference_no=data['reference_no'],
+            source=data['source'], reference_no=data['reference_no'], kind=kind,
         )
         body = {'detail': 'Top-up recorded.', 'warnings': warnings}
         if user.is_owner:
@@ -127,12 +135,12 @@ class OwnerWalletView(APIView):
     permission_classes = [IsOwner]
 
     def get(self, request):
-        return Response(wallet_payload(get_load_wallet()))
+        return Response(wallet_payload(wallet_for(kind_of(request))))
 
     def patch(self, request):
+        wallet = wallet_for(kind_of(request))
         form = LowLevelSerializer(data=request.data)
         form.is_valid(raise_exception=True)
-        wallet = get_load_wallet()
         wallet.low_level = form.validated_data['low_level']
         wallet.save(update_fields=['low_level'])
         return Response(wallet_payload(wallet))
@@ -142,11 +150,12 @@ class WalletAdjustView(APIView):
     permission_classes = [IsOwner]
 
     def post(self, request):
+        kind = kind_of(request)
         form = WalletAdjustSerializer(data=request.data)
         form.is_valid(raise_exception=True)
         adjust_wallet(user=request.user, actual_balance=form.validated_data['actual_balance'],
-                      reason=form.validated_data['reason'])
-        return Response(wallet_payload(get_load_wallet()), status=status.HTTP_201_CREATED)
+                      reason=form.validated_data['reason'], kind=kind)
+        return Response(wallet_payload(wallet_for(kind)), status=status.HTTP_201_CREATED)
 
 
 class LoadNetworkViewSet(viewsets.ModelViewSet):
@@ -161,3 +170,94 @@ class LoadProductViewSet(viewsets.ModelViewSet):
     serializer_class = LoadProductSerializer
     permission_classes = [IsOwner]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
+
+
+def mine_row(tx):
+    cash = tx.amount + tx.fee if tx.type == 'cash_in' else tx.amount - tx.fee
+    return {
+        'id': tx.pk, 'receipt_no': tx.receipt_no, 'type': tx.type, 'amount': str(tx.amount),
+        'cash': str(cash), 'mobile': mask_mobile(tx.customer_mobile), 'reference_no': tx.reference_no,
+        'status': tx.status, 'reversed_note': tx.reversed_note, 'timestamp': tx.timestamp,
+    }
+
+
+class EWalletQuoteView(APIView):
+    permission_classes = [IsCashierOrOwner]
+
+    def get(self, request):
+        raw = request.query_params.get('amount', '')
+        if not raw.isdigit() or not 1 <= int(raw) <= 1000000:
+            raise ValidationError({'amount': 'Enter a whole number of pesos.'})
+        fee = fee_for(get_ewallet(), int(raw))
+        return Response({'amount': int(raw), 'fee': str(fee) if fee is not None else None})
+
+
+class EWalletSendView(APIView):
+    permission_classes = [IsCashierOrOwner]
+    kind = None   # set in urls.py
+
+    def post(self, request):
+        form = EWalletSendSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        data = form.validated_data
+        tx, warnings = ewallet_transaction(
+            cashier=request.user,   # from the login, never from the request body
+            kind=self.kind, amount=Decimal(data['amount']), mobile_no=data['mobile_no'],
+            reference_no=data['reference_no'], fee_override=data.get('fee_override'),
+            override_reason=data.get('override_reason', ''),
+        )
+        tx = EWalletTransaction.objects.select_related('cashier').get(pk=tx.pk)
+        return Response(
+            {'receipt': build_ewallet_receipt(tx), 'tx_id': tx.pk, 'warnings': warnings},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class EWalletMineView(APIView):
+    permission_classes = [IsCashierOrOwner]
+
+    def get(self, request):
+        shift = Shift.objects.filter(cashier=request.user, status=Shift.Status.OPEN).first()
+        if shift is None:
+            return Response({'transactions': []})
+        txs = EWalletTransaction.objects.filter(shift=shift).order_by('-timestamp', '-id')
+        return Response({'transactions': [mine_row(t) for t in txs]})
+
+
+
+def owner_row(tx):
+    return {
+        'id': tx.pk, 'receipt_no': tx.receipt_no, 'type': tx.type, 'amount': str(tx.amount),
+        'fee': str(tx.fee), 'table_fee': str(tx.table_fee) if tx.table_fee is not None else None,
+        'fee_overridden': tx.fee_overridden, 'fee_override_reason': tx.fee_override_reason,
+        'mobile': mask_mobile(tx.customer_mobile), 'reference_no': tx.reference_no, 'status': tx.status,
+        'reversed_note': tx.reversed_note, 'cashier': tx.cashier.username, 'shift': tx.shift_id,
+        'can_reverse': tx.status == 'success' and tx.shift.status == 'open', 'timestamp': tx.timestamp,
+    }
+
+
+class OwnerEWalletView(APIView):
+    permission_classes = [IsOwner]
+
+    def get(self, request):
+        txs = EWalletTransaction.objects.select_related('cashier', 'shift')[:50]
+        return Response({'transactions': [owner_row(t) for t in txs]})
+
+
+class EWalletReverseView(APIView):
+    permission_classes = [IsOwner]
+
+    def post(self, request, pk):
+        form = EWalletReverseSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        reverse_ewallet(user=request.user, tx_id=pk, note=form.validated_data['note'])
+        tx = EWalletTransaction.objects.select_related('cashier', 'shift').get(pk=pk)
+        return Response({'transaction': owner_row(tx)})
+
+
+class FeeRuleViewSet(viewsets.ModelViewSet):
+    serializer_class = FeeRuleSerializer
+    permission_classes = [IsOwner]
+
+    def get_queryset(self):
+        return FeeRule.objects.filter(wallet=get_ewallet())
