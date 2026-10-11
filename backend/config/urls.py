@@ -27,4 +27,5 @@ urlpatterns = [
     path('api/', include('core.urls')),
     path('api/', include('utang.urls')),  
     path('api/', include('wallets.urls')),
+    path('api/', include('analytics.urls')),
 ]

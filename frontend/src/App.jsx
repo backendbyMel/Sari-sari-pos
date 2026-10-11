@@ -3,7 +3,7 @@ import { useAuth } from './AuthContext'
 import ProtectedRoute from './ProtectedRoute'
 import CashierHome from './pages/CashierHome'
 import LoginPage from './pages/LoginPage'
-import OwnerHome from './pages/OwnerHome'
+// import OwnerHome from './pages/OwnerHome'
 import PriceCheckPage from './pages/PriceCheckPage'
 import SalesPage from './pages/SalesPage'
 import ReceiptsPage from './pages/ReceiptsPage'
@@ -29,7 +29,7 @@ import LoadSetupPage from './pages/LoadSetupPage'
 import OwnerWalletPage from './pages/OwnerWalletPage'
 import EWalletPage from './pages/EWalletPage'
 import OwnerEWalletPage from './pages/OwnerEWalletPage'
-
+import DashboardPage from './pages/DashboardPage'
 
 function HomeRedirect() {
   const { user } = useAuth()
@@ -45,6 +45,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/owner" element={<ProtectedRoute role="OWNER"><OwnerLayout /></ProtectedRoute>}>
+        <Route index element={<DashboardPage />} />
         <Route path="wallet" element={<OwnerWalletPage key="load" kind="load" title="Load wallet" />} />
         <Route path="gcash-wallet" element={<OwnerWalletPage key="ewallet" kind="ewallet" title="GCash wallet" />} />
         <Route path="gcash" element={<OwnerEWalletPage />} />
@@ -54,7 +55,7 @@ export default function App() {
         
         <Route path="shift-reports" element={<ShiftReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />
-        <Route index element={<OwnerHome />} />
+        {/* <Route index element={<OwnerHome />} /> */}
         <Route path="products" element={<ProductsPage />} />
         <Route path="products/:id/units" element={<ProductUnitsPage />} />
         <Route path="restock" element={<RestockPage />} />
