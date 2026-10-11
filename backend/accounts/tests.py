@@ -37,6 +37,10 @@ OWNER_ONLY = [
     ('post', '/api/owner/ewallet/1/reverse/'),
     ('get', '/api/owner/fee-rules/'),
     ('get', '/api/owner/dashboard/'),
+    ('get', '/api/owner/reports/sales/'),
+    ('get', '/api/owner/reports/hourly/'),
+    ('get', '/api/owner/reports/best-sellers/'),
+    ('get', '/api/owner/reports/slow-movers/'),
 ]
 LOGIN_REQUIRED = OWNER_ONLY + [
     ('get', '/api/auth/me/'),
