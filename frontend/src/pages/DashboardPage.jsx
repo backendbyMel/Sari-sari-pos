@@ -119,7 +119,8 @@ export default function DashboardPage() {
           {data.low_stock.count > data.low_stock.items.length && (
             <Small>and {data.low_stock.count - data.low_stock.items.length} more</Small>
           )}
-          <Link to="/owner/restock">Restock</Link>
+          {/* <Link to="/owner/restock">Restock</Link> */}
+          <Link to="/owner/restock">Restock</Link> &middot; <Link to="/owner/shopping-list">Shopping list</Link>
         </Card>
 
         <Card title="Best sellers today">

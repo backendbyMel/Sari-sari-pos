@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../api'
 import { PESO, flattenErrors, formatTime } from '../utils'
+import ExportButtons from '../components/ExportButtons'
 
 const todayManila = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
 const addDays = (iso, n) => {
@@ -23,7 +24,8 @@ function presets() {
   ]
 }
 
-function useReport(name, params) {
+export function useReport(name, params) {
+// function useReport(name, params) {
   const [state, setState] = useState({ data: null, error: '', loading: true })
   const key = new URLSearchParams(params).toString()
 
@@ -63,8 +65,8 @@ export default function ReportsPage() {
     setRange({ date_from: from, date_to: to })
   }
 
-  const needsRange = tab !== 'slow'
-
+  // const needsRange = tab !== 'slow'
+  const needsRange = !['slow', 'inventory'].includes(tab)
   return (
     <div style={{ maxWidth: 1100 }}>
       <h1>Reports</h1>
@@ -72,6 +74,13 @@ export default function ReportsPage() {
         {[['sales', 'Sales and profit'], ['best', 'Best sellers'], ['hours', 'Busy hours'], ['slow', 'Slow movers']].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)} disabled={tab === id} style={{ padding: '8px 14px', fontSize: 16 }}>{label}</button>
         ))}
+
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        {[['sales', 'Sales and profit'], ['best', 'Best sellers'], ['hours', 'Busy hours'], ['slow', 'Slow movers'], ['inventory', 'Inventory value']].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} disabled={tab === id} style={{ padding: '8px 14px', fontSize: 16 }}>{label}</button>
+        ))}
+
       </div>
 
       {needsRange && (
@@ -91,10 +100,17 @@ export default function ReportsPage() {
         </div>
       )}
 
+
       {tab === 'sales' && <SalesTab range={range} />}
       {tab === 'best' && <BestTab range={range} />}
       {tab === 'hours' && <HoursTab range={range} />}
       {tab === 'slow' && <SlowTab />}
+      {tab === 'inventory' && <InventoryTab />}
+
+
+
+
+
     </div>
   )
 }
@@ -119,6 +135,10 @@ function SalesTab({ range }) {
           <button key={id} onClick={() => setGroup(id)} disabled={group === id} style={{ padding: '6px 12px' }}>{text}</button>
         ))}
       </div>
+
+      <ExportButtons path="/owner/exports/sales/" params={{ ...range, group }}
+                     name={`sales-${group}-${range.date_from}_to_${range.date_to}`} />
+
       <Status state={state} />
       {data && (
         <>
@@ -203,6 +223,10 @@ function BestTab({ range }) {
   const { data } = state
   return (
     <div>
+      <ExportButtons label="By quantity" path="/owner/exports/best-sellers/" params={{ ...range, rank: 'quantity' }}
+                     name={`best-sellers-quantity-${range.date_from}_to_${range.date_to}`} />
+      <ExportButtons label="By profit" path="/owner/exports/best-sellers/" params={{ ...range, rank: 'profit' }}
+                     name={`best-sellers-profit-${range.date_from}_to_${range.date_to}`} />
       <Status state={state} />
       {data && (
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
@@ -265,6 +289,7 @@ function HoursTab({ range }) {
                 }} />
               </div>
             ))}
+            
           </div>
           <div style={{ display: 'flex', gap: 3 }}>
             {data.hours.map((h) => (
@@ -302,6 +327,9 @@ function SlowTab() {
       </div>
       {error && <p style={{ color: 'crimson' }}>{error}</p>}
       <Status state={state} />
+
+      <ExportButtons path="/owner/exports/slow-movers/" params={{ days: applied }} name={`slow-movers-${applied}-days`} />
+
       {data && (
         <>
           <p style={{ fontSize: 18 }}>
@@ -322,6 +350,67 @@ function SlowTab() {
             </table>
           </div>
           <small style={{ color: '#777' }}>Items added less than {data.days} days ago, items with no stock, inactive items and items with no selling unit are not listed.</small>
+        </>
+      )}
+    </div>
+  )
+}
+
+function InventoryTab() {
+  const state = useReport('inventory', {})
+  const { data } = state
+  return (
+    <div>
+      <ExportButtons path="/owner/exports/inventory/" name={`inventory-value-${todayManila()}`} />
+      <Status state={state} />
+      {data && (
+        <>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', margin: '8px 0 14px' }}>
+            <Stat label="Stock value at cost" value={m(data.total_value)} note={`${data.item_count} product(s)`} />
+            {data.negative_count > 0 && (
+              <Stat label="Need a recount" value={data.negative_count} color="#b86e00" note={`Negative stock counts as ${PESO}0.00`} />
+            )}
+          </div>
+
+          <h2>By category</h2>
+          <table style={table}>
+            <thead><tr style={head}><th style={cell}>Category</th><th style={num}>Products</th><th style={num}>Value at cost</th></tr></thead>
+            <tbody>
+              {data.categories.map((c) => (
+                <tr key={c.category} style={{ borderBottom: '1px solid #ddd' }}>
+                  <td style={cell}><b>{c.category}</b></td><td style={num}>{c.items}</td><td style={num}>{m(c.value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h2>All products</h2>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={table}>
+              <thead>
+                <tr style={head}>
+                  <th style={cell}>Product</th><th style={cell}>Category</th><th style={num}>In stock</th>
+                  <th style={num}>Cost per unit</th><th style={num}>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((i) => (
+                  <tr key={i.id} style={{ borderBottom: '1px solid #ddd', opacity: i.is_active ? 1 : 0.6 }}>
+                    <td style={cell}>
+                      <b>{i.name}</b>
+                      {!i.is_active && <small style={{ color: '#777' }}> (inactive)</small>}
+                      {i.negative && <small style={{ color: '#b86e00' }}> needs recount</small>}
+                    </td>
+                    <td style={cell}>{i.category}</td>
+                    <td style={num}>{i.stock} {i.unit}</td>
+                    <td style={num}>{PESO}{i.cost}</td>
+                    <td style={num}>{m(i.value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <small style={{ color: '#777' }}>Value = stock x average cost. Inactive products that still hold stock are included.</small>
         </>
       )}
     </div>

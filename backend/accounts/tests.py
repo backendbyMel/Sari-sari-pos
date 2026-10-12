@@ -41,6 +41,13 @@ OWNER_ONLY = [
     ('get', '/api/owner/reports/hourly/'),
     ('get', '/api/owner/reports/best-sellers/'),
     ('get', '/api/owner/reports/slow-movers/'),
+    ('get', '/api/owner/reports/inventory/'),
+    ('get', '/api/owner/reports/shopping-list/'),
+    ('get', '/api/owner/exports/sales/'),
+    ('get', '/api/owner/exports/best-sellers/'),
+    ('get', '/api/owner/exports/slow-movers/'),
+    ('get', '/api/owner/exports/inventory/'),
+    ('get', '/api/owner/exports/shopping-list/'),
 ]
 LOGIN_REQUIRED = OWNER_ONLY + [
     ('get', '/api/auth/me/'),

@@ -15,4 +15,6 @@ body {
   }
   .receipt-print { position: absolute; left: 0; top: 0; width: 100%; }
   .no-print, .no-print * { visibility: hidden !important; }
+    .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; }
 }

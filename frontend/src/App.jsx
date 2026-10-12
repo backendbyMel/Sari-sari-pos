@@ -31,6 +31,7 @@ import EWalletPage from './pages/EWalletPage'
 import OwnerEWalletPage from './pages/OwnerEWalletPage'
 import DashboardPage from './pages/DashboardPage'
 import ReportsPage from './pages/ReportsPage'
+import ShoppingListPage from './pages/ShoppingListPage'
 
 function HomeRedirect() {
   const { user } = useAuth()
@@ -46,6 +47,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/owner" element={<ProtectedRoute role="OWNER"><OwnerLayout /></ProtectedRoute>}>
+        <Route path="shopping-list" element={<ShoppingListPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route index element={<DashboardPage />} />
         <Route path="wallet" element={<OwnerWalletPage key="load" kind="load" title="Load wallet" />} />

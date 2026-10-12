@@ -7,7 +7,7 @@ from accounts.permissions import IsOwner
 from .sales_reports import (
     TRUNC, best_sellers, by_cashier, by_category, hourly, parse_range, sales_report, slow_movers,
 )
-
+from .inventory_reports import inventory_value, shopping_list
 
 def int_param(params, key, default, low, high):
     raw = params.get(key)
@@ -60,3 +60,16 @@ class SlowMoversView(APIView):
 
     def get(self, request):
         return Response(slow_movers(int_param(request.query_params, 'days', 30, 1, 365)))
+
+class InventoryReportView(APIView):
+    permission_classes = [IsOwner]
+
+    def get(self, request):
+        return Response(inventory_value())
+
+
+class ShoppingListView(APIView):
+    permission_classes = [IsOwner]
+
+    def get(self, request):
+        return Response(shopping_list())

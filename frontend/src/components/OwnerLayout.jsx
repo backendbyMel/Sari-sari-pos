@@ -17,6 +17,7 @@ const LINKS = [
   { to: '/owner/gcash-wallet', label: 'GCash wallet' },
   { to: '/owner/gcash', label: 'GCash fees' },
   { to: '/owner/reports', label: 'Reports' },
+  { to: '/owner/shopping-list', label: 'Shopping list' },
 ]
 
 export default function OwnerLayout() {
