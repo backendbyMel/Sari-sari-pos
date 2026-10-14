@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db.models import F, Sum
 
 from inventory.models import Product, StockMovement
-from sales.models import Receipt, ReceiptCounter, Sale, SaleItem
+from sales.models import Receipt, ReceiptCounter, Sale, SaleItem, VoidRequest
 from shifts.models import CashMovement, Shift
 from shifts.reports import current_reports
 from shifts.services import shift_totals, expected_cash_for
@@ -34,6 +34,7 @@ class Command(BaseCommand):
         self.check_receipts()
         self.check_shifts()
         self.check_customers()
+        self.check_voids()
         self.check_wallets()
         self.check_wallet_checks()
 
@@ -46,6 +47,28 @@ class Command(BaseCommand):
                 self.stdout.write(f'... and {len(self.problems) - 50} more.')
             raise CommandError(f'{len(self.problems)} problem(s) found. Do not ignore them.')
         self.stdout.write(self.style.SUCCESS('OK: the books add up.'))
+
+    def check_voids(self):
+        approved = {v.sale_id: v for v in VoidRequest.objects.filter(status='approved').select_related('sale')}
+        for sale in Sale.objects.filter(status=Sale.Status.VOIDED):
+            v = approved.get(sale.pk)
+            if v is None:
+                self.problems.append(f'{sale.receipt_no} is voided but has no approved void request.')
+            elif sale.voided_at is None:
+                self.problems.append(f'{sale.receipt_no} is voided but has no void time.')
+        for v in approved.values():
+            no = v.sale.receipt_no
+            if v.sale.status != Sale.Status.VOIDED:
+                self.problems.append(f'The void of {no} is approved but the sale is not voided.')
+            restored = (StockMovement.objects.filter(type='void', reason=f'Void {no}')
+                        .aggregate(t=Sum('quantity'))['t'] or ZERO)
+            sold = SaleItem.objects.filter(sale=v.sale).aggregate(t=Sum('base_quantity'))['t'] or ZERO
+            if restored != sold:
+                self.problems.append(f'The void of {no} put back {restored} in stock but the sale took out {sold}.')
+            refunded = (CashMovement.objects.filter(type='out', reason=f'Refund: void of {no}')
+                        .aggregate(t=Sum('amount'))['t'] or ZERO)
+            if refunded != v.refund_amount:
+                self.problems.append(f'The void of {no} says {v.refund_amount} was refunded but the drawer records {refunded}.')
 
     def check_stock(self):
         names = dict(Product.objects.values_list('id', 'name'))

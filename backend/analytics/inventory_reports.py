@@ -55,7 +55,7 @@ def shopping_list():
     deliveries = (Restock.objects.filter(product_id__in=[p.pk for p in products])
                   .order_by('product_id', '-date', '-id').values('product_id', 'date', 'quantity'))
     for r in deliveries:
-        last.setdefault(r['product_id'], r)          
+        last.setdefault(r['product_id'], r)         
 
     rows = []
     for p in products:

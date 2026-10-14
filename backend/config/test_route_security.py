@@ -17,6 +17,8 @@ CASHIER_OK = {
     'api/ewallet/quote/', 'api/ewallet/cash-in/', 'api/ewallet/cash-out/', 'api/ewallet/mine/',
     'api/wallets/topup/',
     'api/settings/public/',
+    'api/sales/1/void-request/', 
+    'api/voids/mine/',
 }
 
 

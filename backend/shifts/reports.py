@@ -17,10 +17,11 @@ from inventory.models import Product, StockMovement
 from sales.models import Sale, SaleItem
 
 from .models import CashMovement, Shift, ShiftReport
-from .services import shift_totals, wallet_check_rows
+from .services import shift_totals, wallet_check_rows, counted_sales
 from utang.models import UtangPayment
 from wallets.mobile import mask_mobile
 from wallets.models import LoadTransaction, EWalletTransaction
+from sales.models import VoidRequest
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.01')
@@ -29,8 +30,18 @@ BILLS = ['1000', '500', '200', '100', '50', '20']
 
 def build_report_data(shift, *, owner, report_no):
     totals = shift_totals(shift)
-    completed = Sale.objects.filter(shift=shift, status=Sale.Status.COMPLETED)
-    voided = Sale.objects.filter(shift=shift, status=Sale.Status.VOIDED)
+    # completed = Sale.objects.filter(shift=shift, status=Sale.Status.COMPLETED)
+    # voided = Sale.objects.filter(shift=shift, status=Sale.Status.VOIDED)
+    completed = counted_sales(shift)
+    window_end = shift.end_time or timezone.now()
+    void_rows = [
+        {'time': v.decided_at, 'receipt_no': v.sale.receipt_no, 'amount': v.sale.total,
+         'type': 'Utang' if v.sale.payment_type == 'utang' else 'Cash',
+         'reason': v.reason, 'approved_by': v.decided_by.username}
+        for v in VoidRequest.objects.filter(
+            status='approved', decided_at__gte=shift.start_time, decided_at__lte=window_end
+        ).select_related('sale', 'decided_by').order_by('decided_at', 'id')
+    ]
     utang_given = [
         {'customer': row['customer__name'], 'amount': row['t']}
         for row in completed.filter(payment_type=Sale.PaymentType.UTANG)
@@ -81,9 +92,10 @@ def build_report_data(shift, *, owner, report_no):
 
     rows, product_ids = {}, set()
     items = (
-        SaleItem.objects.filter(sale__shift=shift, sale__status=Sale.Status.COMPLETED)
-        .select_related('product', 'product_unit')
-        .order_by('product__name', 'product_unit__pieces_per_unit', 'id')
+        # SaleItem.objects.filter(sale__shift=shift, sale__status=Sale.Status.COMPLETED)
+        # .select_related('product', 'product_unit')
+        # .order_by('product__name', 'product_unit__pieces_per_unit', 'id')
+        SaleItem.objects.filter(sale__in=completed)
     )
     for item in items:
         product_ids.add(item.product_id)
@@ -153,8 +165,11 @@ def build_report_data(shift, *, owner, report_no):
                 timestamp__gte=shift.start_time, timestamp__lte=shift.end_time,
             ).select_related('product', 'user').order_by('timestamp', 'id')
         ],
-        'voided_count': voided.count(),
-        'voided_total': voided.aggregate(t=Sum('total'))['t'] or ZERO,
+        # 'voided_count': voided.count(),
+        # 'voided_total': voided.aggregate(t=Sum('total'))['t'] or ZERO,
+        'voided_count': len(void_rows),
+        'voided_total': sum((v['amount'] for v in void_rows), ZERO),
+        'void_rows': void_rows,
         'discounts_total': completed.aggregate(t=Sum('discount'))['t'] or ZERO,
     }
     if owner:
@@ -416,6 +431,13 @@ def render_pdf(data):
         [['Voided sales', f"{data['voided_count']} ({php(data['voided_total'])})"],
          ['Discounts given', php(data['discounts_total'])]],
         [90, 90], right=(1,), header=False)]
+
+    if data['void_rows']:
+        story.append(Spacer(1, 2 * mm))
+        rows = [['Time', 'Receipt', 'Paid by', 'Amount', 'Reason', 'Approved by']]
+        rows += [[stamp(v['time']), v['receipt_no'], v['type'], php(v['amount']), P(v['reason']), v['approved_by']]
+                 for v in data['void_rows']]
+        story.append(grid(rows, [30, 22, 18, 25, 60, 25], right=(3,)))
 
     if owner:
         rows = []

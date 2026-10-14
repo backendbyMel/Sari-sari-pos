@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Receipt, Sale, SaleItem
+from .models import Receipt, Sale, SaleItem, VoidRequest
 from config.admin_utils import ReadOnlyAdmin, ReadOnlyInline
 # Register your models here.
 class SaleItemInline(admin.TabularInline):
@@ -16,3 +16,7 @@ class SaleAdmin(ReadOnlyAdmin):
 @admin.register(Receipt)
 class ReceiptAdmin(ReadOnlyAdmin):
     list_display = ('receipt_no', 'source', 'printed_count', 'created_at')
+
+@admin.register(VoidRequest)
+class VoidRequestAdmin(ReadOnlyAdmin):
+    list_display = ('requested_at', 'sale', 'requested_by', 'status', 'decided_by', 'refund_amount')

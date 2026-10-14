@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from core.services import get_overdue_days
 from inventory.models import Product
-from sales.models import Sale, SaleItem
+from sales.models import Sale, SaleItem, VoidRequest
 from shifts.models import Shift
 from utang.models import BadDebtWriteOff, Customer
 from utang.services import unpaid_ages
@@ -156,4 +156,14 @@ def dashboard(day=None):
         'utang': utang_card(),
         'wallets': wallet_cards(),
         'best_sellers': best_sellers(start, end),
+        'voids': voids_card()
+    }
+
+def voids_card():
+    recent = (VoidRequest.objects.filter(status='approved')
+              .select_related('sale', 'decided_by').order_by('-decided_at')[:5])
+    return {
+        'pending_count': VoidRequest.objects.filter(status='pending').count(),
+        'recent': [{'receipt_no': v.sale.receipt_no, 'amount': money(v.sale.total), 'reason': v.reason,
+                    'approved_by': v.decided_by.username, 'decided_at': v.decided_at} for v in recent],
     }

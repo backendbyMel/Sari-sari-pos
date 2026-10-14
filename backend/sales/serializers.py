@@ -27,3 +27,14 @@ class SaleCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({'customer': 'Choose the customer who is taking the utang.'})
             attrs.pop('cash_received', None)   
         return attrs
+
+class VoidRequestSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=200) 
+
+
+class VoidApproveSerializer(serializers.Serializer):
+    note = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
+
+
+class VoidRejectSerializer(serializers.Serializer):
+    note = serializers.CharField(max_length=200)  

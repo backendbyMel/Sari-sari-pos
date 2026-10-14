@@ -11,6 +11,7 @@ from .models import Shift, ShiftReopen, CashMovement
 from utang.models import UtangPayment
 from wallets.models import LoadTransaction, EWalletTransaction, ShiftWalletCheck, Wallet, WalletTransaction
 import re
+from django.db.models import Q, Sum
 
 ZERO = Decimal('0')
 BALANCE_OK = re.compile(r'^\d{1,10}(\.\d{1,2})?$')
@@ -100,9 +101,14 @@ def start_shift(*, cashier, opening_cash, wallet_balances=None):
             {'shift': 'Another shift was just started. Check the shift status.'}
         )
 
+def counted_sales(shift):
+    wanted = Q(status=Sale.Status.COMPLETED)
+    if shift.end_time:
+        wanted |= Q(status=Sale.Status.VOIDED, voided_at__gt=shift.end_time)
+    return Sale.objects.filter(shift=shift).filter(wanted)
 
 def shift_totals(shift):
-    sales = Sale.objects.filter(shift=shift, status=Sale.Status.COMPLETED)
+    sales = counted_sales(shift)
     cash = sales.filter(payment_type=Sale.PaymentType.CASH).aggregate(t=Sum('total'))['t']
     on_utang = sales.filter(payment_type=Sale.PaymentType.UTANG).aggregate(t=Sum('total'))['t']
     everything = sales.aggregate(t=Sum('total'))['t']

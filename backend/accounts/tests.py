@@ -48,6 +48,9 @@ OWNER_ONLY = [
     ('get', '/api/owner/exports/slow-movers/'),
     ('get', '/api/owner/exports/inventory/'),
     ('get', '/api/owner/exports/shopping-list/'),
+    ('get', '/api/voids/'),
+    ('post', '/api/voids/1/approve/'),
+    ('post', '/api/voids/1/reject/')
 ]
 LOGIN_REQUIRED = OWNER_ONLY + [
     ('get', '/api/auth/me/'),
@@ -78,6 +81,8 @@ LOGIN_REQUIRED = OWNER_ONLY + [
     ('post', '/api/ewallet/cash-in/'),
     ('post', '/api/ewallet/cash-out/'),
     ('get', '/api/shifts/wallets-to-check/'),
+    ('post', '/api/sales/SR-000001/void-request/'),
+    ('get', '/api/voids/mine/')
 ]
 
 

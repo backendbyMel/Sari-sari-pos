@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from inventory.models import Product, ProductUnit
+from django.db.models import Q
 # Create your models here.
 ZERO = Decimal('0')
 
@@ -22,7 +23,7 @@ class Sale(models.Model):
     class Status(models.TextChoices):
         COMPLETED = 'completed', 'Completed'
         VOIDED = 'voided', 'Voided'
-
+        
     receipt_no = models.CharField(max_length=20, unique=True)
     cashier = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='sales'
@@ -56,6 +57,7 @@ class Sale(models.Model):
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.COMPLETED
     )
+    voided_at = models.DateTimeField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -123,3 +125,42 @@ class Receipt(models.Model):
 
     def __str__(self):
         return self.receipt_no
+
+
+class VoidRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    sale = models.ForeignKey(Sale, on_delete=models.PROTECT, related_name='void_requests')
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='void_requests')
+    reason = models.CharField(max_length=200)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    requested_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                   on_delete=models.PROTECT, related_name='void_decisions')
+    decision_note = models.CharField(max_length=200, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    refund_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0'))
+    refund_shift = models.ForeignKey('shifts.Shift', null=True, blank=True, on_delete=models.PROTECT,
+                                     related_name='void_refunds')
+
+    class Meta:
+        ordering = ['-requested_at', '-id']
+        constraints = [
+            models.UniqueConstraint(fields=['sale'], condition=Q(status__in=['pending', 'approved']),
+                                    name='one_live_void_per_sale'),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding and VoidRequest.objects.filter(pk=self.pk).exclude(status='pending').exists():
+            raise PermissionError('A decided void request cannot be changed.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError('Void requests cannot be deleted.')
+
+    def __str__(self):
+        return f'Void {self.sale.receipt_no} ({self.status})'
