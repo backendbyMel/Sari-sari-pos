@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { apiFetch } from '../api'
 import ReceiptView from '../components/ReceiptView'
 import { PESO } from '../utils'
+import VoidRequestForm from '../components/VoidRequestForm'
 
 export default function ReceiptsPage() {
   const [search, setSearch] = useState('')
@@ -170,6 +171,10 @@ export default function ReceiptsPage() {
 
             {modalError && <p style={{ color: 'crimson', maxWidth: 300 }}>{modalError}</p>}
 
+            {open.receipt.kind === 'sale' && !open.receipt.is_void && (
+              <VoidRequestForm key={open.receipt.receipt_no} receiptNo={open.receipt.receipt_no} />
+            )}
+            
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               {!open.receipt.is_copy && (
                 <button onClick={reprint} disabled={reprinting} style={{ flex: 2, padding: 12 }}>

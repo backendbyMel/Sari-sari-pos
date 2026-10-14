@@ -132,7 +132,17 @@ export default function DashboardPage() {
           ))}
         </Card>
 
-        <Card title="Coming later">
+        <Card title="Voids">
+          {data.voids.pending_count > 0
+            ? <p style={{ margin: '4px 0', color: '#c0392b' }}><b>{data.voids.pending_count}</b> request(s) waiting for you</p>
+            : <Small>No requests waiting.</Small>}
+          {data.voids.recent.map((v) => (
+            <Small key={v.receipt_no}>{v.receipt_no} {PESO}{v.amount} voided by {v.approved_by}: {v.reason}</Small>
+          ))}
+          <Link to="/owner/voids">Open Voids</Link>
+        </Card>
+
+        <Card title="Items expiring soon are not tracked yet.">
           <Small>Items expiring soon, and recent voids, arrive in Phase 5 with expiry tracking and voids.</Small>
         </Card>
       </div>

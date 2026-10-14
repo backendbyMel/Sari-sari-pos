@@ -31,13 +31,22 @@ def normalize(raw):
 def all_paths():
     found = set()
 
+    # def walk(patterns, prefix):
+    #     for pattern in patterns:
+    #         if hasattr(pattern, 'url_patterns'):     
+    #             walk(pattern.url_patterns, prefix + str(pattern.pattern))
+    #         else:
+    #             found.add(normalize(prefix + str(pattern.pattern)))
+
     def walk(patterns, prefix):
         for pattern in patterns:
             if hasattr(pattern, 'url_patterns'):     
                 walk(pattern.url_patterns, prefix + str(pattern.pattern))
+            elif getattr(pattern, 'name', None) == 'spa':
+                continue                             
             else:
                 found.add(normalize(prefix + str(pattern.pattern)))
-
+                
     walk(get_resolver().url_patterns, '')
     return sorted(p for p in found if not p.startswith('admin/'))
 

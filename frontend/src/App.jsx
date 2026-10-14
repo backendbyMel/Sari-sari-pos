@@ -32,6 +32,8 @@ import OwnerEWalletPage from './pages/OwnerEWalletPage'
 import DashboardPage from './pages/DashboardPage'
 import ReportsPage from './pages/ReportsPage'
 import ShoppingListPage from './pages/ShoppingListPage'
+import MyVoidsPage from './pages/MyVoidsPage'
+import VoidsPage from './pages/VoidsPage'
 
 function HomeRedirect() {
   const { user } = useAuth()
@@ -47,6 +49,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/owner" element={<ProtectedRoute role="OWNER"><OwnerLayout /></ProtectedRoute>}>
+        <Route path="voids" element={<VoidsPage />} />
         <Route path="shopping-list" element={<ShoppingListPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route index element={<DashboardPage />} />
@@ -71,6 +74,7 @@ export default function App() {
       </Route>
 
       <Route path="/cashier" element={<ProtectedRoute><CashierHome /></ProtectedRoute>} />
+      <Route path="/voids" element={<ProtectedRoute><MyVoidsPage /></ProtectedRoute>} />
       <Route path="/gcash" element={<ProtectedRoute><EWalletPage /></ProtectedRoute>} />
       <Route path="/load" element={<ProtectedRoute><LoadPage /></ProtectedRoute>} />
       <Route path="/shift/start" element={<ProtectedRoute><StartShiftPage /></ProtectedRoute>} />

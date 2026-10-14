@@ -50,6 +50,7 @@ export default function CashierHome() {
       <p style={{ fontSize: 20 }}><Link to="/gcash">GCash cash in / out</Link></p>
       <p style={{ fontSize: 20 }}><Link to="/price-check">Price Check</Link></p>
       <p style={{ fontSize: 20 }}><Link to="/reports/mine">My past reports</Link></p>
+      <p style={{ fontSize: 20 }}><Link to="/voids">My void requests</Link></p>
     </div>
   )
 }

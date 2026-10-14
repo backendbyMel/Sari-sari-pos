@@ -6,3 +6,6 @@ db.sqlite3
 node_modules/
 media/
 /backend/reports/
+/frontend/dist/
+/backend/staticfiles/
+/logs/

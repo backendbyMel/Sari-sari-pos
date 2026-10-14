@@ -64,6 +64,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -210,3 +211,19 @@ if 'test' in sys.argv:
 
 if 'test' in sys.argv:
     PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
+
+STATIC_ROOT = BASE_DIR / 'staticfiles'                    
+FRONTEND_DIST = BASE_DIR.parent / 'frontend' / 'dist'       
+WHITENOISE_ROOT = FRONTEND_DIST       
+REST_FRAMEWORK['NUM_PROXIES'] = 0
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'root': {'handlers': ['console'], 'level': 'WARNING'},
+}
+
+if os.environ.get('POS_HTTPS') == '1':
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True

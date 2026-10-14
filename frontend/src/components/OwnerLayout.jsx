@@ -18,6 +18,7 @@ const LINKS = [
   { to: '/owner/gcash', label: 'GCash fees' },
   { to: '/owner/reports', label: 'Reports' },
   { to: '/owner/shopping-list', label: 'Shopping list' },
+  { to: '/owner/voids', label: 'Voids' }
 ]
 
 export default function OwnerLayout() {
